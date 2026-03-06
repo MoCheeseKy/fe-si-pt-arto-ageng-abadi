@@ -38,3 +38,21 @@ export const driverSchema = z.object({
 });
 
 export type DriverFormValues = z.infer<typeof driverSchema>;
+
+export interface Employee {
+  id: string;
+  name: string;
+  nik: string;
+  position: string;
+  phone_number: string;
+  status: 'Aktif' | 'Nonaktif';
+}
+
+export const employeeSchema = z.object({
+  name: z.string().min(3, { message: 'Nama Karyawan minimal 3 karakter' }),
+  nik: z.string().length(16, { message: 'NIK harus 16 digit angka' }),
+  position: z.string().min(2, { message: 'Jabatan wajib diisi' }),
+  phone_number: z.string().min(9, { message: 'Nomor HP tidak valid' }),
+});
+
+export type EmployeeFormValues = z.infer<typeof employeeSchema>;
