@@ -482,7 +482,7 @@ export default function RoleAccessPage() {
             </Button>
           </div>
           <DataTable
-            columns={navCols}
+            columns={navCols as any}
             data={filteredNavs}
             isLoading={isLoading}
             emptyMessage='Belum ada data Navigasi.'
@@ -512,7 +512,7 @@ export default function RoleAccessPage() {
             </Button>
           </div>
           <DataTable
-            columns={roleNavCols}
+            columns={roleNavCols as any}
             data={filteredRoleNavs}
             isLoading={isLoading}
             emptyMessage='Belum ada pemetaan hak akses.'
