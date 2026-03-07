@@ -53,7 +53,7 @@ export default function DriverPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<DriverFormValues>({
-    resolver: zodResolver(driverSchema),
+    resolver: zodResolver(driverSchema as any),
     defaultValues: {
       name: '',
       nik: '',
@@ -252,7 +252,7 @@ export default function DriverPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data driver yang ditemukan.'

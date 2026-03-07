@@ -78,7 +78,7 @@ export default function SupplierPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<SupplierFormValues>({
-    resolver: zodResolver(supplierSchema),
+    resolver: zodResolver(supplierSchema as any),
     defaultValues: {
       company_name: '',
       address: '',
@@ -325,7 +325,7 @@ export default function SupplierPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data supplier yang ditemukan.'

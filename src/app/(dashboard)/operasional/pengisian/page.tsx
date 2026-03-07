@@ -99,7 +99,7 @@ export default function PengisianPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<PurchaseFormValues>({
-    resolver: zodResolver(purchaseSchema),
+    resolver: zodResolver(purchaseSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       supplier_id: '',
@@ -390,7 +390,7 @@ export default function PengisianPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Belum ada riwayat transaksi pengisian.'

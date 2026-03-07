@@ -108,15 +108,15 @@ export default function RoleAccessPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const roleForm = useForm<RoleFormValues>({
-    resolver: zodResolver(roleSchema),
+    resolver: zodResolver(roleSchema as any),
     defaultValues: { name: '' },
   });
   const navForm = useForm<NavFormValues>({
-    resolver: zodResolver(navigationSchema),
+    resolver: zodResolver(navigationSchema as any),
     defaultValues: { name: '', path: '' },
   });
   const roleNavForm = useForm<RoleNavFormValues>({
-    resolver: zodResolver(roleNavSchema),
+    resolver: zodResolver(roleNavSchema as any),
     defaultValues: { role_id: '', navigation_id: '' },
   });
 
@@ -451,7 +451,7 @@ export default function RoleAccessPage() {
             </Button>
           </div>
           <DataTable
-            columns={roleCols}
+            columns={roleCols as any}
             data={filteredRoles}
             isLoading={isLoading}
             emptyMessage='Belum ada data Role.'

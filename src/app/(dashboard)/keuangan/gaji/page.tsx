@@ -84,7 +84,7 @@ export default function PayrollPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<PayrollFormValues>({
-    resolver: zodResolver(payrollSchema),
+    resolver: zodResolver(payrollSchema as any),
     defaultValues: {
       employee_id: '',
       period: '',
@@ -378,7 +378,7 @@ export default function PayrollPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada riwayat penggajian.'

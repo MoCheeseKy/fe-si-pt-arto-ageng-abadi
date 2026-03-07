@@ -55,7 +55,7 @@ export default function JurnalPage() {
   const [viewingJournal, setViewingJournal] = useState<Journal | null>(null);
 
   const form = useForm<ManualJournalFormValues>({
-    resolver: zodResolver(manualJournalSchema),
+    resolver: zodResolver(manualJournalSchema as any),
     defaultValues: {
       transaction_date: new Date().toISOString().split('T')[0],
       description: '',
@@ -65,7 +65,6 @@ export default function JurnalPage() {
       ],
     },
   });
-
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: 'entries',
@@ -319,7 +318,7 @@ export default function JurnalPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada riwayat jurnal.'

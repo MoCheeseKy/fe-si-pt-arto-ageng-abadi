@@ -84,7 +84,7 @@ export default function InvoicePage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<InvoiceFormValues>({
-    resolver: zodResolver(invoiceSchema),
+    resolver: zodResolver(invoiceSchema as any),
     defaultValues: {
       customer_id: '',
       invoice_number: '',
@@ -402,7 +402,7 @@ export default function InvoicePage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data invoice.'

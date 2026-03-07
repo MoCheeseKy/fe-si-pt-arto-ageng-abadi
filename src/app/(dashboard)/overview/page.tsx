@@ -136,7 +136,7 @@ export default function OverviewPage() {
         const sortedDeposits = [...deposits]
           .sort((a, b) => a.amount - b.amount)
           .slice(0, 3)
-          .map((d) => ({
+          .map((d: any) => ({
             name: getCustomerName(d.customer_id),
             amount: d.amount,
           }));
@@ -183,12 +183,10 @@ export default function OverviewPage() {
 
         acts.sort((a, b) => b.rawDate - a.rawDate);
         setActivities(
-          acts
-            .slice(0, 5)
-            .map((a) => ({
-              ...a,
-              date: format(new Date(a.date), 'dd MMM yyyy'),
-            })),
+          acts.slice(0, 5).map((a) => ({
+            ...a,
+            date: format(new Date(a.date), 'dd MMM yyyy'),
+          })),
         );
       } catch (error) {
         console.error('Gagal load dashboard', error);

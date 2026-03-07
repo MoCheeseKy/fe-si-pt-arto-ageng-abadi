@@ -83,7 +83,7 @@ export default function PettyCashPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<PettyCashFormValues>({
-    resolver: zodResolver(pettyCashSchema),
+    resolver: zodResolver(pettyCashSchema as any),
     defaultValues: {
       customer_id: '',
       transaction_type: 'Pengeluaran',
@@ -406,7 +406,7 @@ export default function PettyCashPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada catatan kas kecil.'

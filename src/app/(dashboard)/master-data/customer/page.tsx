@@ -57,7 +57,7 @@ export default function CustomerPage() {
 
   // --- FORM SETUP ---
   const form = useForm<CustomerFormValues>({
-    resolver: zodResolver(customerSchema),
+    resolver: zodResolver(customerSchema as any),
     defaultValues: {
       company_name: '',
       npwp: '',
@@ -312,7 +312,7 @@ export default function CustomerPage() {
 
         {/* Reusable Data Table */}
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data customer yang ditemukan.'

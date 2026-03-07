@@ -68,7 +68,7 @@ export default function KaryawanPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<EmployeeFormValues>({
-    resolver: zodResolver(employeeSchema),
+    resolver: zodResolver(employeeSchema as any),
     defaultValues: { name: '', nik: '' },
   });
 
@@ -254,7 +254,7 @@ export default function KaryawanPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data karyawan yang ditemukan.'

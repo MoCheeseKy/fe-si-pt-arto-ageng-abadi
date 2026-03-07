@@ -59,13 +59,13 @@ export default function ReportingPage() {
             : turbinRes.data?.rows || []),
         ];
 
-        const filtered = allUsage.filter((d) => {
+        const filtered = allUsage.filter((d: any) => {
           if (!d.date) return false;
           const tgl = new Date(d.date).toISOString().split('T')[0];
           return tgl >= dateStart && tgl <= dateEnd;
         });
 
-        dataToExport = filtered.map((d) => ({
+        dataToExport = filtered.map((d: any) => ({
           'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
           'ID Customer': d.customer_id,
           'Metode':
@@ -86,13 +86,13 @@ export default function ReportingPage() {
         const res = await api.get<any>('/v1/purchases');
         const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
 
-        const filtered = list.filter((d) => {
+        const filtered = list.filter((d: any) => {
           if (!d.date) return false;
           const tgl = new Date(d.date).toISOString().split('T')[0];
           return tgl >= dateStart && tgl <= dateEnd;
         });
 
-        dataToExport = filtered.map((d) => ({
+        dataToExport = filtered.map((d: any) => ({
           'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
           'Nomor DO': d.do_number || '-',
           'ID Supplier': d.supplier_id,
@@ -109,13 +109,13 @@ export default function ReportingPage() {
         const res = await api.get<any>('/v1/invoices');
         const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
 
-        const filtered = list.filter((d) => {
+        const filtered = list.filter((d: any) => {
           if (!d.date) return false;
           const tgl = new Date(d.date).toISOString().split('T')[0];
           return tgl >= dateStart && tgl <= dateEnd;
         });
 
-        dataToExport = filtered.map((d) => ({
+        dataToExport = filtered.map((d: any) => ({
           'Tanggal Terbit': format(new Date(d.date), 'dd/MM/yyyy'),
           'No. Invoice': d.invoice_number,
           'ID Customer': d.customer_id,
@@ -130,13 +130,13 @@ export default function ReportingPage() {
         const res = await api.get<any>('/v1/expenses');
         const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
 
-        const filtered = list.filter((d) => {
+        const filtered = list.filter((d: any) => {
           if (!d.date) return false;
           const tgl = new Date(d.date).toISOString().split('T')[0];
           return tgl >= dateStart && tgl <= dateEnd;
         });
 
-        dataToExport = filtered.map((d) => ({
+        dataToExport = filtered.map((d: any) => ({
           'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
           'Tipe': d.expense_type,
           'Deskripsi': d.description,

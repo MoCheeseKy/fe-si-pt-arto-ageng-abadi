@@ -120,7 +120,7 @@ export default function PemakaianGasPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<UsageFormValues>({
-    resolver: zodResolver(usageSchema),
+    resolver: zodResolver(usageSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       customer_id: '',
@@ -575,7 +575,7 @@ export default function PemakaianGasPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada riwayat pemakaian gas.'

@@ -79,7 +79,7 @@ export default function DepositPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<DepositFormValues>({
-    resolver: zodResolver(depositSchema),
+    resolver: zodResolver(depositSchema as any),
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],
@@ -336,7 +336,7 @@ export default function DepositPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada histori deposit.'

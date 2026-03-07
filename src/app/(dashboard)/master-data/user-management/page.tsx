@@ -361,7 +361,7 @@ export default function UserManagementPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data pengguna yang ditemukan.'

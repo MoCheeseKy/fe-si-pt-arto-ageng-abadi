@@ -83,7 +83,7 @@ export default function PengeluaranPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<ExpenseFormValues>({
-    resolver: zodResolver(expenseSchema),
+    resolver: zodResolver(expenseSchema as any),
     defaultValues: {
       customer_id: '',
       expense_type: 'Operasional',
@@ -380,7 +380,7 @@ export default function PengeluaranPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data pengeluaran.'

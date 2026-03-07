@@ -57,7 +57,7 @@ export default function CoaPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<CoaFormValues>({
-    resolver: zodResolver(coaSchema),
+    resolver: zodResolver(coaSchema as any),
     defaultValues: {
       account_code: '',
       account_name: '',
@@ -323,7 +323,7 @@ export default function CoaPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada data akun CoA.'

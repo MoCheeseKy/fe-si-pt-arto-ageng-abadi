@@ -131,13 +131,13 @@ export default function KontrakPenawaranPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const offerForm = useForm<OfferFormValues>({
-    resolver: zodResolver(offerSchema),
+    resolver: zodResolver(offerSchema as any),
   });
   const pjbgForm = useForm<PjbgFormValues>({
-    resolver: zodResolver(pjbgSchema),
+    resolver: zodResolver(pjbgSchema as any),
   });
   const keyTermForm = useForm<KeyTermFormValues>({
-    resolver: zodResolver(keyTermSchema),
+    resolver: zodResolver(keyTermSchema as any),
   });
 
   /**
@@ -519,7 +519,7 @@ export default function KontrakPenawaranPage() {
             </Button>
           </div>
           <DataTable
-            columns={offerColumns}
+            columns={offerColumns as any}
             data={filteredOffers}
             isLoading={isLoading}
             emptyMessage='Belum ada data penawaran.'
@@ -550,7 +550,7 @@ export default function KontrakPenawaranPage() {
             </Button>
           </div>
           <DataTable
-            columns={pjbgColumns}
+            columns={pjbgColumns as any}
             data={filteredPjbgs}
             isLoading={isLoading}
             emptyMessage='Belum ada data Kontrak PJBG.'
@@ -581,7 +581,7 @@ export default function KontrakPenawaranPage() {
             </Button>
           </div>
           <DataTable
-            columns={keyTermColumns}
+            columns={keyTermColumns as any}
             data={filteredKeyTerms}
             isLoading={isLoading}
             emptyMessage='Belum ada data Key Terms.'

@@ -84,7 +84,7 @@ export default function KasbonPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<CashAdvanceFormValues>({
-    resolver: zodResolver(cashAdvanceSchema),
+    resolver: zodResolver(cashAdvanceSchema as any),
     defaultValues: {
       employee_id: '',
       date: new Date().toISOString().split('T')[0],
@@ -387,7 +387,7 @@ export default function KasbonPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={filteredData}
           isLoading={isLoading}
           emptyMessage='Tidak ada riwayat kasbon.'
