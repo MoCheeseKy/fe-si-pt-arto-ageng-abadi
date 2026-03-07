@@ -1,80 +1,102 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
-import {
-  Search,
   Plus,
-  FileText,
-  MoreHorizontal,
+  Truck,
+  RefreshCcw,
+  AlertCircle,
+  ArrowUpDown,
   Calculator,
-  DollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
+import { format } from 'date-fns';
 
-import {
-  Purchase,
-  PurchaseFormValues,
-  purchaseSchema,
-} from '@/types/operasional';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { Select } from '@/components/form/Select';
+import { DatePicker } from '@/components/form/DatePicker';
+import { NumberInput } from '@/components/form/NumberInput';
+import { CurrencyInput } from '@/components/form/CurrencyInput';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
-const dummyPurchases: Purchase[] = [
-  {
-    id: 'PO-2510-001',
-    date: '2025-10-24',
-    supplier_name: 'PT. Gas Bumi Nusantara',
-    nomor_do: 'DO/GBN/1024/01',
-    plat_nomor: 'B 9012 CXY',
-    jenis_gtm: '20FT',
-    volume_mmbtu: 1450.5,
-    total_penjualan: 45000000,
-    currency: 'IDR',
-    status: 'Selesai',
-  },
-  {
-    id: 'PO-2510-002',
-    date: '2025-10-25',
-    supplier_name: 'CV. Energi Mandiri',
-    nomor_do: 'DO/EM/1025/08',
-    plat_nomor: 'D 1234 ABC',
-    jenis_gtm: '40FT',
-    volume_mmbtu: 3200.75,
-    total_penjualan: 9500,
-    currency: 'USD',
-    status: 'Pending',
-  },
-];
+const purchaseSchema = z.object({
+  date: z.string().min(1, 'Tanggal wajib diisi'),
+  supplier_id: z.string().min(1, 'Supplier wajib dipilih'),
+  driver_id: z.string().min(1, 'Driver wajib dipilih'),
+  license_plate: z.string().optional(),
+  gtm_type: z.string().optional(),
+  do_number: z.string().optional(),
+  ghc: z.coerce.number().optional(),
+  pressure_start: z.coerce.number().optional(),
+  pressure_finish: z.coerce.number().optional(),
+  meter_start: z.coerce.number().optional(),
+  meter_finish: z.coerce.number().optional(),
+  metering_fill_post: z.coerce.number().optional(),
+  volume_mmscf: z.coerce.number().optional(),
+  volume_mmbtu: z.coerce.number().optional(),
+  currency: z.enum(['IDR', 'USD']).default('IDR'),
+  exchange_rate: z.coerce.number().optional(),
+  price_per_sm3: z.coerce.number().optional(),
+  total_sales: z.coerce.number().optional(),
+});
+
+type PurchaseFormValues = z.infer<typeof purchaseSchema>;
+
+export interface Purchase extends Omit<PurchaseFormValues, 'date'> {
+  id: string;
+  date: Date;
+  supplier?: { company_name: string };
+  driver?: { name: string };
+}
 
 const columnHelper = createColumnHelper<Purchase>();
 
-export default function PengisianGasPage() {
-  const [data, setData] = useState<Purchase[]>(dummyPurchases);
+/**
+ * Halaman manajemen operasional Pengisian Gas (Purchases).
+ * Terintegrasi dengan endpoint /v1/purchases, /v1/suppliers, dan /v1/drivers.
+ *
+ * @returns {JSX.Element} Komponen UI halaman Pengisian Gas
+ */
+export default function PengisianPage() {
+  const [data, setData] = useState<Purchase[]>([]);
+  const [suppliers, setSuppliers] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const [drivers, setDrivers] = useState<{ label: string; value: string }[]>(
+    [],
+  );
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [globalFilter, setGlobalFilter] = useState('');
+  const [currencyFilter, setCurrencyFilter] = useState('Semua');
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<PurchaseFormValues>({
     resolver: zodResolver(purchaseSchema),
@@ -82,455 +104,483 @@ export default function PengisianGasPage() {
       date: new Date().toISOString().split('T')[0],
       supplier_id: '',
       driver_id: '',
-      plat_nomor: '',
-      jenis_gtm: '20FT',
-      nomor_do: '',
+      license_plate: '',
+      gtm_type: '',
+      do_number: '',
       ghc: 0,
       pressure_start: 0,
       pressure_finish: 0,
-      meter_awal: 0,
-      meter_akhir: 0,
+      meter_start: 0,
+      meter_finish: 0,
+      metering_fill_post: 0,
+      volume_mmscf: 0,
+      volume_mmbtu: 0,
       currency: 'IDR',
       exchange_rate: 0,
       price_per_sm3: 0,
+      total_sales: 0,
     },
   });
 
-  // --- LOGIKA KALKULASI REAKTIF ---
-  const watchValues = useWatch({ control: form.control });
+  const watchCurrency = useWatch({ control: form.control, name: 'currency' });
+  const watchPrice =
+    useWatch({ control: form.control, name: 'price_per_sm3' }) || 0;
+  const watchVolumeMMBTU =
+    useWatch({ control: form.control, name: 'volume_mmbtu' }) || 0;
+  const watchVolumeMMSCF =
+    useWatch({ control: form.control, name: 'volume_mmscf' }) || 0;
 
-  // TODO: Rumus asli menunggu file Excel. Ini adalah mock calculation agar UI reaktif.
-  const calcMatering =
-    (watchValues.meter_akhir || 0) - (watchValues.meter_awal || 0);
-  const calcPressureDiff =
-    (watchValues.pressure_finish || 0) - (watchValues.pressure_start || 0);
-  const calcMMSCF = calcMatering * 0.0353147; // Dummy multiplier
-  const calcMMBTU = calcMMSCF * (watchValues.ghc || 1); // Dummy multiplier
+  const calculatedTotal =
+    watchCurrency === 'USD'
+      ? watchVolumeMMBTU * watchPrice
+      : watchVolumeMMSCF * watchPrice;
 
-  // Harga * MMBTU (sesuai instruksi prompt: price * mmbtu)
-  let totalPenjualan = calcMMBTU * (watchValues.price_per_sm3 || 0);
-  if (watchValues.currency === 'USD') {
-    // Jika USD, kita simpan nilainya dalam USD.
-    // (Bisa juga dikali exchange_rate jika ingin disimpan nilai IDR-nya, kita ikuti instruksi price*mmbtu)
-    totalPenjualan = calcMMBTU * (watchValues.price_per_sm3 || 0);
-  }
+  /**
+   * Mengambil data pembelian, supplier, dan driver secara paralel untuk efisiensi render.
+   *
+   * @returns {Promise<void>}
+   */
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [purchasesRes, suppliersRes, driversRes] = await Promise.all([
+        api.get<any>('/v1/purchases'),
+        api.get<any>('/v1/suppliers'),
+        api.get<any>('/v1/drivers'),
+      ]);
 
-  const onSubmit = async (values: PurchaseFormValues) => {
-    await new Promise((res) => setTimeout(res, 800));
-    toast.success('Data pengisian gas berhasil disimpan');
-    setIsDialogOpen(false);
+      const purchasesData = Array.isArray(purchasesRes.data)
+        ? purchasesRes.data
+        : purchasesRes.data?.rows || [];
+      const suppliersData = Array.isArray(suppliersRes.data)
+        ? suppliersRes.data
+        : suppliersRes.data?.rows || [];
+      const driversData = Array.isArray(driversRes.data)
+        ? driversRes.data
+        : driversRes.data?.rows || [];
+
+      setData(purchasesData);
+      setSuppliers(
+        suppliersData.map((s: any) => ({ label: s.company_name, value: s.id })),
+      );
+      setDrivers(driversData.map((d: any) => ({ label: d.name, value: d.id })));
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data dari server.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  /**
+   * Mempersiapkan payload dan membuka modal form.
+   *
+   * @param {Purchase} [purchase] - Data entitas jika dalam mode edit
+   */
+  const handleOpenDialog = (purchase?: Purchase) => {
+    if (purchase) {
+      setEditingId(purchase.id);
+      form.reset({
+        ...purchase,
+        date: new Date(purchase.date).toISOString().split('T')[0],
+      });
+    } else {
+      setEditingId(null);
+      form.reset({
+        date: new Date().toISOString().split('T')[0],
+        supplier_id: '',
+        driver_id: '',
+        currency: 'IDR',
+        ghc: 0,
+        pressure_start: 0,
+        pressure_finish: 0,
+        meter_start: 0,
+        meter_finish: 0,
+        metering_fill_post: 0,
+        volume_mmscf: 0,
+        volume_mmbtu: 0,
+        exchange_rate: 0,
+        price_per_sm3: 0,
+      });
+    }
+    setIsDialogOpen(true);
   };
+
+  /**
+   * Menangani proses penambahan atau pembaruan data transaksi pembelian.
+   *
+   * @param {PurchaseFormValues} values - Payload dari react-hook-form
+   */
+  const onSubmit = async (values: PurchaseFormValues) => {
+    try {
+      const payload = {
+        ...values,
+        total_sales: calculatedTotal,
+      };
+
+      if (editingId) {
+        await api.put(`/v1/purchases/${editingId}`, payload);
+        toast.success('Transaksi pengisian berhasil diperbarui.');
+      } else {
+        await api.post('/v1/purchases', payload);
+        toast.success('Transaksi pengisian baru berhasil dicatat.');
+      }
+      setIsDialogOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan transaksi.');
+    }
+  };
+
+  /**
+   * Menghapus transaksi pembelian berdasarkan ID.
+   */
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/v1/purchases/${deletingId}`);
+      toast.success('Transaksi pengisian berhasil dihapus.');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus transaksi.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
+  };
+
+  const filteredData = useMemo(() => {
+    if (currencyFilter === 'Semua') return data;
+    return data.filter((item) => item.currency === currencyFilter);
+  }, [data, currencyFilter]);
 
   const columns = useMemo(
     () => [
-      columnHelper.accessor('id', {
-        header: 'ID Transaksi',
+      columnHelper.accessor('do_number', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            No. DO <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
-          <span className='font-semibold'>{info.getValue()}</span>
+          <span className='font-mono font-semibold text-primary'>
+            {info.getValue() || '-'}
+          </span>
         ),
       }),
-      columnHelper.accessor('date', { header: 'Tanggal' }),
-      columnHelper.accessor('supplier_name', {
-        header: 'Supplier & Logistik',
+      columnHelper.accessor('date', {
+        header: 'Tanggal',
         cell: (info) => (
-          <div className='flex flex-col'>
-            <span className='font-medium text-foreground'>
-              {info.getValue()}
-            </span>
-            <span className='text-xs text-muted-foreground'>
-              {info.row.original.nomor_do} • {info.row.original.plat_nomor} (
-              {info.row.original.jenis_gtm})
-            </span>
-          </div>
+          <span className='text-muted-foreground'>
+            {format(new Date(info.getValue()), 'dd MMM yyyy')}
+          </span>
+        ),
+      }),
+      columnHelper.accessor('supplier_id', {
+        header: 'Supplier',
+        cell: (info) => (
+          <span className='font-medium text-foreground'>
+            {info.row.original.supplier?.company_name || 'Unknown Supplier'}
+          </span>
         ),
       }),
       columnHelper.accessor('volume_mmbtu', {
-        header: 'Vol MMBTU',
+        header: 'Vol. MMBTU',
         cell: (info) => (
-          <span className='font-mono'>{info.getValue().toFixed(2)}</span>
+          <span className='font-mono text-emerald-500'>
+            {info.getValue()?.toLocaleString('id-ID') || 0}
+          </span>
         ),
       }),
-      columnHelper.accessor('total_penjualan', {
+      columnHelper.accessor('total_sales', {
         header: 'Total Nilai',
         cell: (info) => {
-          const isUSD = info.row.original.currency === 'USD';
+          const val = info.getValue() || 0;
+          const cur = info.row.original.currency;
           return (
-            <span
-              className={`font-semibold ${isUSD ? 'text-amber-500' : 'text-emerald-500'}`}
-            >
-              {isUSD ? '$' : 'Rp'} {info.getValue().toLocaleString('id-ID')}
+            <span className='font-mono font-bold'>
+              {cur === 'USD' ? '$' : 'Rp'} {val.toLocaleString('id-ID')}
             </span>
           );
         },
       }),
-      columnHelper.accessor('status', {
-        header: 'Status',
-        cell: (info) => (
-          <Badge
-            variant={info.getValue() === 'Selesai' ? 'default' : 'secondary'}
-          >
-            {info.getValue()}
-          </Badge>
-        ),
-      }),
       columnHelper.display({
         id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon'>
-                <MoreHorizontal className='h-4 w-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end'>
-              <DropdownMenuItem>
-                <FileText className='mr-2 h-4 w-4' /> Detail DO
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TableActions
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
+          />
         ),
       }),
     ],
     [],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-  });
-
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
-      <div className='flex justify-between items-center'>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className='text-2xl font-heading font-bold'>
-            Pembelian (Pengisian Gas)
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
+            Pengisian Gas (Purchases)
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
-            Catat penerimaan gas CNG dari Supplier ke GTM.
+            Pencatatan pembelian dan loading gas CNG dari Mother Station.
           </p>
         </div>
         <Button
-          onClick={() => setIsDialogOpen(true)}
-          className='bg-primary text-white'
+          onClick={() => handleOpenDialog()}
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
         >
           <Plus className='w-4 h-4 mr-2' /> Input Pengisian
         </Button>
       </div>
 
-      {/* Tabel Data */}
-      <div className='bg-card border border-border rounded-xl shadow-sm overflow-hidden'>
-        <div className='p-4 border-b border-border bg-muted/20'>
-          <div className='relative w-full max-w-sm'>
-            <Search className='absolute left-3 top-2.5 h-4 w-4 text-muted-foreground' />
-            <Input
-              placeholder='Cari transaksi DO atau Plat...'
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className='pl-9 bg-background'
-            />
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
+          </div>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchData}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
+          >
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
+        </div>
+      )}
+
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/20'>
+          <SearchInput
+            value={globalFilter ?? ''}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder='Cari No. DO...'
+            className='w-full sm:max-w-sm'
+          />
+
+          <div className='flex items-center gap-2 w-full sm:w-auto'>
+            <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider'>
+              Mata Uang:
+            </span>
+            <select
+              value={currencyFilter}
+              onChange={(e) => setCurrencyFilter(e.target.value)}
+              className='flex h-9 w-full sm:w-32 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-primary'
+            >
+              <option value='Semua'>Semua</option>
+              <option value='IDR'>IDR</option>
+              <option value='USD'>USD</option>
+            </select>
           </div>
         </div>
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm text-left'>
-            <thead className='bg-muted/40 text-muted-foreground font-heading'>
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((h) => (
-                    <th key={h.id} className='px-6 py-4 font-semibold border-b'>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className='hover:bg-muted/10'>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className='px-6 py-4'>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+
+        <DataTable
+          columns={columns}
+          data={filteredData}
+          isLoading={isLoading}
+          emptyMessage='Belum ada riwayat transaksi pengisian.'
+        />
       </div>
 
-      {/* Dialog Form Lebar (Berisi Kalkulator Realtime) */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className='max-w-5xl bg-card p-0 overflow-hidden'>
-          <div className='flex flex-col lg:flex-row h-[85vh] lg:h-[700px]'>
-            {/* Sisi Kiri: Form Input */}
-            <div className='flex-1 p-6 overflow-y-auto custom-scrollbar border-r border-border'>
-              <DialogHeader className='mb-6'>
-                <DialogTitle className='font-heading text-xl'>
-                  Input Pengisian Gas Baru
-                </DialogTitle>
-              </DialogHeader>
-              <form
-                id='purchase-form'
-                onSubmit={form.handleSubmit(onSubmit)}
-                className='space-y-6'
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={editingId ? 'Edit Transaksi Pengisian' : 'Input Pengisian Baru'}
+        size='xl'
+        footer={
+          <div className='flex justify-between w-full items-center'>
+            <div className='flex items-center gap-2 text-sm'>
+              <Calculator className='w-4 h-4 text-muted-foreground' />
+              <span className='text-muted-foreground'>Estimasi Total:</span>
+              <span
+                className={`font-mono font-bold text-lg ${watchCurrency === 'USD' ? 'text-amber-500' : 'text-emerald-500'}`}
               >
-                {/* Section: Logistik */}
-                <div className='space-y-4'>
-                  <h3 className='text-sm font-bold uppercase text-muted-foreground tracking-wider border-b border-border pb-2'>
-                    Informasi Logistik
-                  </h3>
-                  <div className='grid grid-cols-2 gap-4'>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Tanggal</label>
-                      <Input type='date' {...form.register('date')} />
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Nomor DO</label>
-                      <Input
-                        {...form.register('nomor_do')}
-                        placeholder='DO/XXX/...'
-                      />
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Supplier</label>
-                      <select
-                        {...form.register('supplier_id')}
-                        className='flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                      >
-                        <option value=''>-- Pilih Supplier --</option>
-                        <option value='1'>PT. Gas Bumi Nusantara</option>
-                      </select>
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Driver</label>
-                      <select
-                        {...form.register('driver_id')}
-                        className='flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                      >
-                        <option value=''>-- Pilih Driver --</option>
-                        <option value='1'>Ahmad Sujatmiko</option>
-                      </select>
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Plat Nomor</label>
-                      <Input
-                        {...form.register('plat_nomor')}
-                        placeholder='B 1234 XX'
-                      />
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Jenis GTM</label>
-                      <select
-                        {...form.register('jenis_gtm')}
-                        className='flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors'
-                      >
-                        <option value='10FT'>10 FT</option>
-                        <option value='20FT'>20 FT</option>
-                        <option value='40FT'>40 FT</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section: Parameter Teknis */}
-                <div className='space-y-4'>
-                  <h3 className='text-sm font-bold uppercase text-muted-foreground tracking-wider border-b border-border pb-2'>
-                    Parameter Teknis
-                  </h3>
-                  <div className='grid grid-cols-3 gap-4'>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>GHC</label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('ghc')}
-                      />
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>
-                        Pressure Start
-                      </label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('pressure_start')}
-                      />
-                    </div>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>
-                        Pressure Finish
-                      </label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('pressure_finish')}
-                      />
-                    </div>
-                    <div className='space-y-1 col-span-3 lg:col-span-1'>
-                      <label className='text-xs font-medium'>Meter Awal</label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('meter_awal')}
-                      />
-                    </div>
-                    <div className='space-y-1 col-span-3 lg:col-span-2'>
-                      <label className='text-xs font-medium'>Meter Akhir</label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('meter_akhir')}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section: Harga & Mata Uang */}
-                <div className='space-y-4 pb-4'>
-                  <h3 className='text-sm font-bold uppercase text-muted-foreground tracking-wider border-b border-border pb-2'>
-                    Komersial (Harga)
-                  </h3>
-                  <div className='grid grid-cols-2 gap-4'>
-                    <div className='space-y-1'>
-                      <label className='text-xs font-medium'>Mata Uang</label>
-                      <select
-                        {...form.register('currency')}
-                        className='flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors'
-                      >
-                        <option value='IDR'>Rupiah (IDR)</option>
-                        <option value='USD'>Dolar (USD)</option>
-                      </select>
-                    </div>
-                    {watchValues.currency === 'USD' && (
-                      <div className='space-y-1'>
-                        <label className='text-xs font-medium text-amber-500'>
-                          Kurs Rupiah (Statis)
-                        </label>
-                        <Input
-                          type='number'
-                          step='any'
-                          {...form.register('exchange_rate')}
-                          placeholder='15500'
-                          className='border-amber-500/50 focus-visible:ring-amber-500'
-                        />
-                        {form.formState.errors.exchange_rate && (
-                          <p className='text-[10px] text-destructive'>
-                            {form.formState.errors.exchange_rate.message}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <div className='space-y-1 col-span-2'>
-                      <label className='text-xs font-medium'>
-                        Harga per Sm³ ({watchValues.currency})
-                      </label>
-                      <Input
-                        type='number'
-                        step='any'
-                        {...form.register('price_per_sm3')}
-                        className='text-lg font-mono'
-                      />
-                    </div>
-                  </div>
-                </div>
-              </form>
+                {watchCurrency === 'USD' ? '$' : 'Rp'}{' '}
+                {calculatedTotal.toLocaleString('id-ID')}
+              </span>
             </div>
-
-            {/* Sisi Kanan: Panel Kalkulasi Otomatis */}
-            <div className='w-full lg:w-[380px] bg-sidebar/50 p-6 flex flex-col justify-between sidebar-gradient-dark'>
-              <div>
-                <div className='flex items-center gap-2 mb-6'>
-                  <Calculator className='w-5 h-5 text-primary' />
-                  <h3 className='font-heading font-semibold text-lg'>
-                    Auto Kalkulasi
-                  </h3>
-                </div>
-
-                <div className='space-y-4'>
-                  <div className='bg-background/80 p-3 rounded-lg border border-border'>
-                    <p className='text-xs text-muted-foreground mb-1'>
-                      Selisih Meter (Matering Fill Post)
-                    </p>
-                    <p className='text-lg font-mono font-semibold'>
-                      {calcMatering.toFixed(2)}{' '}
-                      <span className='text-xs font-sans text-muted-foreground'>
-                        M³
-                      </span>
-                    </p>
-                  </div>
-
-                  <div className='bg-background/80 p-3 rounded-lg border border-border'>
-                    <p className='text-xs text-muted-foreground mb-1'>
-                      Volume MMSCF
-                    </p>
-                    <p className='text-lg font-mono font-semibold text-blue-500'>
-                      {calcMMSCF.toFixed(4)}
-                    </p>
-                  </div>
-
-                  <div className='bg-background/80 p-3 rounded-lg border border-border border-l-4 border-l-primary shadow-sm'>
-                    <p className='text-xs text-muted-foreground mb-1 font-bold'>
-                      Volume MMBTU (Final Tagihan)
-                    </p>
-                    <p className='text-2xl font-mono font-bold text-primary'>
-                      {calcMMBTU.toFixed(4)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className='mt-8 pt-6 border-t border-border border-dashed'>
-                  <p className='text-xs text-muted-foreground mb-2 flex items-center justify-between'>
-                    Estimasi Total Penjualan
-                    <Badge
-                      variant='outline'
-                      className={
-                        watchValues.currency === 'USD'
-                          ? 'text-amber-500 border-amber-500/30'
-                          : ''
-                      }
-                    >
-                      {watchValues.currency}
-                    </Badge>
-                  </p>
-                  <p className='text-3xl font-heading font-bold text-foreground break-all'>
-                    {watchValues.currency === 'USD' ? '$' : 'Rp'}{' '}
-                    {totalPenjualan.toLocaleString('id-ID', {
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className='mt-8 pt-4'>
-                <Button
-                  type='submit'
-                  form='purchase-form'
-                  className='w-full h-12 text-md font-semibold bg-primary hover:bg-primary/90 text-white'
-                  disabled={form.formState.isSubmitting}
-                >
-                  {form.formState.isSubmitting
-                    ? 'Menyimpan Transaksi...'
-                    : 'Simpan Transaksi Pengisian'}
-                </Button>
-                <p className='text-[10px] text-center text-muted-foreground mt-3 leading-tight'>
-                  Rumus kalkulasi saat ini menggunakan{' '}
-                  <span className='text-amber-500'>dummy multiplier</span>. Akan
-                  diperbarui otomatis setelah file Excel master
-                  diimplementasikan.
-                </p>
-              </div>
+            <div className='flex gap-3'>
+              <Button
+                type='button'
+                variant='ghost'
+                onClick={() => setIsDialogOpen(false)}
+              >
+                Batal
+              </Button>
+              <Button
+                type='submit'
+                form='purchase-form'
+                className='bg-primary hover:bg-primary/90 text-white'
+                disabled={form.formState.isSubmitting}
+              >
+                {form.formState.isSubmitting
+                  ? 'Menyimpan...'
+                  : 'Simpan Transaksi'}
+              </Button>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        }
+      >
+        <form
+          id='purchase-form'
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='space-y-6 py-2'
+        >
+          <div className='grid grid-cols-1 md:grid-cols-3 gap-5'>
+            <DatePicker
+              label='Tanggal Pengisian'
+              required
+              value={form.watch('date')}
+              onChange={(val) => form.setValue('date', val)}
+              error={form.formState.errors.date?.message}
+            />
+            <Select
+              label='Supplier (Mother Station)'
+              required
+              options={suppliers}
+              value={form.watch('supplier_id')}
+              onChange={(val) => form.setValue('supplier_id', val)}
+              error={form.formState.errors.supplier_id?.message}
+            />
+            <Input
+              label='Nomor DO'
+              placeholder='DO/XXX/...'
+              error={form.formState.errors.do_number?.message}
+              {...form.register('do_number')}
+            />
+          </div>
+
+          <div className='grid grid-cols-1 md:grid-cols-3 gap-5'>
+            <Select
+              label='Driver GTM'
+              required
+              options={drivers}
+              value={form.watch('driver_id')}
+              onChange={(val) => form.setValue('driver_id', val)}
+              error={form.formState.errors.driver_id?.message}
+            />
+            <Input
+              label='Plat Nomor'
+              placeholder='B 1234 XXX'
+              error={form.formState.errors.license_plate?.message}
+              {...form.register('license_plate')}
+            />
+            <Input
+              label='Jenis GTM'
+              placeholder='10FT / 20FT / 40FT'
+              error={form.formState.errors.gtm_type?.message}
+              {...form.register('gtm_type')}
+            />
+          </div>
+
+          <div className='border-t border-border/50 pt-4 mt-2'>
+            <h4 className='text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4'>
+              Parameter Teknis & Volume
+            </h4>
+            <div className='grid grid-cols-1 md:grid-cols-4 gap-5'>
+              <NumberInput
+                label='GHC'
+                value={form.watch('ghc')}
+                onChange={(val) => form.setValue('ghc', val)}
+              />
+              <NumberInput
+                label='Pressure Start'
+                value={form.watch('pressure_start')}
+                onChange={(val) => form.setValue('pressure_start', val)}
+              />
+              <NumberInput
+                label='Pressure Finish'
+                value={form.watch('pressure_finish')}
+                onChange={(val) => form.setValue('pressure_finish', val)}
+              />
+              <NumberInput
+                label='Metering Fill Post'
+                value={form.watch('metering_fill_post')}
+                onChange={(val) => form.setValue('metering_fill_post', val)}
+              />
+              <NumberInput
+                label='Meter Start'
+                value={form.watch('meter_start')}
+                onChange={(val) => form.setValue('meter_start', val)}
+              />
+              <NumberInput
+                label='Meter Finish'
+                value={form.watch('meter_finish')}
+                onChange={(val) => form.setValue('meter_finish', val)}
+              />
+              <NumberInput
+                label='Volume (MMSCF)'
+                value={form.watch('volume_mmscf')}
+                onChange={(val) => form.setValue('volume_mmscf', val)}
+              />
+              <NumberInput
+                label='Volume (MMBTU)'
+                value={form.watch('volume_mmbtu')}
+                onChange={(val) => form.setValue('volume_mmbtu', val)}
+              />
+            </div>
+          </div>
+
+          <div className='border-t border-border/50 pt-4 mt-2'>
+            <h4 className='text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4'>
+              Komersial
+            </h4>
+            <CurrencyInput
+              label='Harga per Sm3 / MMBTU'
+              amount={form.watch('price_per_sm3') || 0}
+              onAmountChange={(val) => form.setValue('price_per_sm3', val)}
+              currency={form.watch('currency')}
+              onCurrencyChange={(val) => form.setValue('currency', val)}
+              exchangeRate={form.watch('exchange_rate')}
+              onExchangeRateChange={(val) =>
+                form.setValue('exchange_rate', val)
+              }
+            />
+          </div>
+        </form>
+      </Modal>
+
+      <AlertDialog
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus transaksi pengisian ini? Laporan
+              keuangan terkait mungkin akan terpengaruh.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

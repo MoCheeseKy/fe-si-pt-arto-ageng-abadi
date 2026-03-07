@@ -1,4 +1,4 @@
-// src/components/form/AppDatePicker.tsx
+// src/components/form/DatePicker.tsx
 import * as React from 'react';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
@@ -10,7 +10,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 
-export interface AppDatePickerProps {
+export interface DatePickerProps {
   label?: string;
   error?: string;
   value?: string;
@@ -28,7 +28,7 @@ export function DatePicker({
   disabled,
   required,
   placeholder = 'Pilih Tanggal',
-}: AppDatePickerProps) {
+}: DatePickerProps) {
   const date = value ? new Date(value) : undefined;
 
   const handleSelect = (selectedDate: Date | undefined) => {
