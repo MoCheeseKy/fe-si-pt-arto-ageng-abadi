@@ -1,272 +1,563 @@
-"use client";
+'use client';
 
-import { useState, useMemo } from "react";
-import { useForm, useWatch } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { createColumnHelper, flexRender, getCoreRowModel, getFilteredRowModel, useReactTable } from "@tanstack/react-table";
-import { Search, Plus, FileText, MoreHorizontal, Calculator, Receipt, Printer, Send } from "lucide-react";
-import { toast } from "sonner";
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
+import {
+  Plus,
+  Receipt,
+  RefreshCcw,
+  AlertCircle,
+  ArrowUpDown,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { z } from 'zod';
+import { format } from 'date-fns';
 
-import { Invoice, InvoiceFormValues, invoiceSchema } from "@/types/keuangan";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { api } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { Select } from '@/components/form/Select';
+import { DatePicker } from '@/components/form/DatePicker';
+import { NumberInput } from '@/components/form/NumberInput';
+import { Textarea } from '@/components/form/Textarea';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
-const dummyInvoices: Invoice[] = [
-  { id: "1", invoice_number: "INV/AAA/1025/001", date: "2025-10-25", customer_name: "PT. Industri Maju Abadi", po_number: "PO/IMA/1025/12", total_amount: 45000000, deposit_deduction: 5000000, final_amount: 40000000, status: "Unpaid" },
-  { id: "2", invoice_number: "INV/AAA/1025/002", date: "2025-10-24", customer_name: "PT. Tekno Pangan", po_number: "PO/TP/1025/08", total_amount: 12500000, deposit_deduction: 0, final_amount: 12500000, status: "Paid" },
-];
+const invoiceSchema = z.object({
+  customer_id: z.string().min(1, 'Customer wajib dipilih'),
+  invoice_number: z.string().optional(),
+  date: z.string().optional(),
+  po_number: z.string().optional(),
+  po_date: z.string().optional(),
+  period_start: z.string().optional(),
+  period_end: z.string().optional(),
+  total_usage: z.coerce.number().optional(),
+  deposit_deduction: z.coerce.number().optional(),
+  total_bill: z.coerce.number().optional(),
+  note: z.string().optional(),
+});
 
-// Mock data: List Pemakaian yang belum ditagihkan (biasanya ditarik via API setelah Customer dipilih)
-const mockUnbilledUsages = [
-  { id: "USE-001", date: "2025-10-20", metode: "Delta Pressure", volume: "4,500 Sm3", amount: 18500000 },
-  { id: "USE-002", date: "2025-10-22", metode: "Delta Pressure", volume: "4,200 Sm3", amount: 16800000 },
-];
+type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
-// Mock data: Info Kontrak Customer
-const mockCustomerInfo = {
-  contract_type: "Top Up", // Bisa "Top Up" atau "Deposit"
-  current_deposit_balance: 15000000,
-};
+export interface InvoiceRow extends InvoiceFormValues {
+  id: string;
+  customer_name?: string;
+}
 
-const columnHelper = createColumnHelper<Invoice>();
+const columnHelper = createColumnHelper<InvoiceRow>();
 
+/**
+ * Halaman manajemen operasional Invoice (Penagihan).
+ * Terintegrasi dengan endpoint /v1/invoices dan /v1/customers.
+ *
+ * @returns {JSX.Element} Komponen UI halaman Invoice
+ */
 export default function InvoicePage() {
-  const [data, setData] = useState<Invoice[]>(dummyInvoices);
-  const [globalFilter, setGlobalFilter] = useState("");
+  const [data, setData] = useState<InvoiceRow[]>([]);
+  const [customers, setCustomers] = useState<
+    { label: string; value: string }[]
+  >([]);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [globalFilter, setGlobalFilter] = useState('');
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<InvoiceFormValues>({
     resolver: zodResolver(invoiceSchema),
     defaultValues: {
+      customer_id: '',
+      invoice_number: '',
       date: new Date().toISOString().split('T')[0],
-      customer_id: "", invoice_number: "", po_number: "", po_date: "", period_start: "", period_end: "", note: "",
-      selected_usages: []
-    }
+      po_number: '',
+      po_date: '',
+      period_start: '',
+      period_end: '',
+      total_usage: 0,
+      deposit_deduction: 0,
+      total_bill: 0,
+      note: '',
+    },
   });
 
-  const watchValues = useWatch({ control: form.control });
+  const watchTotalUsage =
+    useWatch({ control: form.control, name: 'total_usage' }) || 0;
+  const watchDepositDeduction =
+    useWatch({ control: form.control, name: 'deposit_deduction' }) || 0;
 
-  // --- LOGIKA KALKULASI TAGIHAN ---
-  // 1. Hitung total dari pemakaian yang di-ceklis
-  const selectedUsagesData = mockUnbilledUsages.filter(u => watchValues.selected_usages?.includes(u.id));
-  const totalPemakaian = selectedUsagesData.reduce((sum, item) => sum + item.amount, 0);
+  const calculatedTotalBill = useMemo(() => {
+    return watchTotalUsage - watchDepositDeduction;
+  }, [watchTotalUsage, watchDepositDeduction]);
 
-  // 2. Tentukan potongan deposit berdasarkan jenis kontrak
-  let potonganDeposit = 0;
-  if (watchValues.customer_id === "1") { // Simulasi jika PT Industri Maju Abadi (Top Up) dipilih
-    if (mockCustomerInfo.contract_type === "Top Up") {
-      // Potong saldo maksimal sebesar tagihan, sisanya menjadi tagihan akhir
-      potonganDeposit = Math.min(mockCustomerInfo.current_deposit_balance, totalPemakaian);
+  useEffect(() => {
+    form.setValue(
+      'total_bill',
+      calculatedTotalBill > 0 ? calculatedTotalBill : 0,
+    );
+  }, [calculatedTotalBill, form]);
+
+  /**
+   * Mengambil data invoice dan customer secara paralel untuk merender tabel dan opsi dropdown.
+   *
+   * @returns {Promise<void>}
+   */
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [invoiceRes, custRes] = await Promise.all([
+        api.get<any>('/v1/invoices'),
+        api.get<any>('/v1/customers'),
+      ]);
+
+      const invoiceList = Array.isArray(invoiceRes.data)
+        ? invoiceRes.data
+        : invoiceRes.data?.rows || [];
+      const custList = Array.isArray(custRes.data)
+        ? custRes.data
+        : custRes.data?.rows || [];
+
+      setCustomers(
+        custList.map((c: any) => ({ label: c.company_name, value: c.id })),
+      );
+
+      const getCustomerName = (id: string) =>
+        custList.find((c: any) => c.id === id)?.company_name ||
+        'Unknown Customer';
+
+      const mappedData: InvoiceRow[] = invoiceList.map((item: any) => ({
+        ...item,
+        customer_name: getCustomerName(item.customer_id),
+      }));
+
+      setData(
+        mappedData.sort(
+          (a, b) =>
+            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+        ),
+      );
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data dari server.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, []);
 
-  // 3. Tagihan Akhir
-  const tagihanAkhir = totalPemakaian - potonganDeposit;
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
-  const handleToggleUsage = (usageId: string, checked: boolean) => {
-    const current = watchValues.selected_usages || [];
-    if (checked) form.setValue("selected_usages", [...current, usageId], { shouldValidate: true });
-    else form.setValue("selected_usages", current.filter(id => id !== usageId), { shouldValidate: true });
+  /**
+   * Menginisialisasi nilai form dan membuka modal untuk pembuatan atau pengubahan data.
+   *
+   * @param {InvoiceRow} [invoice] - Data invoice yang akan diedit (opsional)
+   */
+  const handleOpenDialog = (invoice?: InvoiceRow) => {
+    if (invoice) {
+      setEditingId(invoice.id);
+      form.reset({
+        ...invoice,
+        date: invoice.date
+          ? new Date(invoice.date).toISOString().split('T')[0]
+          : '',
+        po_date: invoice.po_date
+          ? new Date(invoice.po_date).toISOString().split('T')[0]
+          : '',
+        period_start: invoice.period_start
+          ? new Date(invoice.period_start).toISOString().split('T')[0]
+          : '',
+        period_end: invoice.period_end
+          ? new Date(invoice.period_end).toISOString().split('T')[0]
+          : '',
+      });
+    } else {
+      setEditingId(null);
+      form.reset({
+        customer_id: '',
+        invoice_number: '',
+        date: new Date().toISOString().split('T')[0],
+        po_number: '',
+        po_date: '',
+        period_start: '',
+        period_end: '',
+        total_usage: 0,
+        deposit_deduction: 0,
+        total_bill: 0,
+        note: '',
+      });
+    }
+    setIsDialogOpen(true);
   };
 
+  /**
+   * Mengirimkan data form ke endpoint API untuk operasi Create atau Update.
+   *
+   * @param {InvoiceFormValues} values - Nilai data dari form
+   */
   const onSubmit = async (values: InvoiceFormValues) => {
-    await new Promise(res => setTimeout(res, 800));
-    toast.success("Invoice berhasil di-generate dan tersimpan.");
-    setIsDialogOpen(false);
+    try {
+      const payload = {
+        ...values,
+        date: values.date || undefined,
+        po_date: values.po_date || undefined,
+        period_start: values.period_start || undefined,
+        period_end: values.period_end || undefined,
+      };
+
+      if (editingId) {
+        await api.put(`/v1/invoices/${editingId}`, payload);
+        toast.success('Invoice berhasil diperbarui.');
+      } else {
+        await api.post('/v1/invoices', payload);
+        toast.success('Invoice baru berhasil diterbitkan.');
+      }
+      setIsDialogOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan invoice.');
+    }
   };
 
-  const columns = useMemo(() => [
-    columnHelper.accessor("invoice_number", { header: "No. Invoice", cell: info => <span className="font-bold text-foreground">{info.getValue()}</span> }),
-    columnHelper.accessor("date", { header: "Tanggal" }),
-    columnHelper.accessor("customer_name", {
-      header: "Customer & Referensi",
-      cell: info => (
-        <div className="flex flex-col">
-          <span className="font-medium">{info.getValue()}</span>
-          <span className="text-xs text-muted-foreground">PO: {info.row.original.po_number}</span>
-        </div>
-      )
-    }),
-    columnHelper.accessor("final_amount", {
-      header: "Tagihan Akhir",
-      cell: info => <span className="font-bold text-primary">Rp {info.getValue().toLocaleString('id-ID')}</span>
-    }),
-    columnHelper.accessor("status", {
-      header: "Status",
-      cell: info => {
-        const val = info.getValue();
-        return <Badge variant={val === "Paid" ? "default" : (val === "Overdue" ? "destructive" : "secondary")} className={val === "Paid" ? "bg-emerald-500" : ""}>{val}</Badge>;
-      }
-    }),
-    columnHelper.display({
-      id: "actions",
-      cell: info => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem><FileText className="mr-2 h-4 w-4" /> Lihat Detail</DropdownMenuItem>
-            <DropdownMenuItem><Printer className="mr-2 h-4 w-4" /> Cetak Invoice</DropdownMenuItem>
-            <DropdownMenuItem className="text-primary focus:text-primary"><Send className="mr-2 h-4 w-4" /> Kirim ke Customer</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )
-    })
-  ], []);
+  /**
+   * Menghapus data invoice secara permanen melalui endpoint API.
+   */
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/v1/invoices/${deletingId}`);
+      toast.success('Invoice berhasil dihapus.');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus data.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
+  };
 
-  const table = useReactTable({ data, columns, state: { globalFilter }, onGlobalFilterChange: setGlobalFilter, getCoreRowModel: getCoreRowModel(), getFilteredRowModel: getFilteredRowModel() });
+  const filteredData = useMemo(() => {
+    return data.filter(
+      (item) =>
+        (item.invoice_number || '')
+          .toLowerCase()
+          .includes(globalFilter.toLowerCase()) ||
+        (item.customer_name || '')
+          .toLowerCase()
+          .includes(globalFilter.toLowerCase()),
+    );
+  }, [data, globalFilter]);
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor('invoice_number', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            No. Invoice <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='font-mono font-semibold text-primary'>
+            {info.getValue() || '-'}
+          </span>
+        ),
+      }),
+      columnHelper.accessor('date', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Tgl. Terbit <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='text-muted-foreground'>
+            {info.getValue()
+              ? format(new Date(info.getValue()!), 'dd MMM yyyy')
+              : '-'}
+          </span>
+        ),
+      }),
+      columnHelper.accessor('customer_name', {
+        header: 'Customer',
+        cell: (info) => (
+          <div className='flex items-center gap-2'>
+            <Receipt className='w-4 h-4 text-muted-foreground' />
+            <span className='font-medium text-foreground'>
+              {info.getValue()}
+            </span>
+          </div>
+        ),
+      }),
+      columnHelper.accessor('period_start', {
+        header: 'Periode Pemakaian',
+        cell: (info) => {
+          const start = info.getValue()
+            ? format(new Date(info.getValue()!), 'dd MMM')
+            : '-';
+          const end = info.row.original.period_end
+            ? format(new Date(info.row.original.period_end), 'dd MMM yyyy')
+            : '-';
+          return (
+            <span className='text-xs text-muted-foreground'>
+              {start} - {end}
+            </span>
+          );
+        },
+      }),
+      columnHelper.accessor('total_bill', {
+        header: 'Total Tagihan',
+        cell: (info) => (
+          <span className='font-mono font-bold text-emerald-500'>
+            Rp {(info.getValue() || 0).toLocaleString('id-ID')}
+          </span>
+        ),
+      }),
+      columnHelper.display({
+        id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
+        cell: (info) => (
+          <TableActions
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
+          />
+        ),
+      }),
+    ],
+    [],
+  );
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-center">
+    <div className='space-y-6 animate-in fade-in duration-500'>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className="text-2xl font-heading font-bold">Manajemen Invoice</h2>
-          <p className="text-sm text-muted-foreground mt-1">Generate tagihan pelanggan berdasarkan akumulasi pemakaian gas.</p>
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
+            Invoice Penagihan
+          </h2>
+          <p className='text-sm text-muted-foreground mt-1'>
+            Penerbitan tagihan gas CNG kepada customer beserta kalkulasi
+            potongan deposit.
+          </p>
         </div>
-        <Button onClick={() => setIsDialogOpen(true)} className="bg-primary text-white"><Plus className="w-4 h-4 mr-2" /> Generate Invoice</Button>
+        <Button
+          onClick={() => handleOpenDialog()}
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
+        >
+          <Plus className='w-4 h-4 mr-2' /> Terbitkan Invoice
+        </Button>
       </div>
 
-      {/* Tabel Data */}
-      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-border bg-muted/20">
-          <div className="relative w-full max-w-sm">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Cari no invoice atau customer..." value={globalFilter} onChange={e => setGlobalFilter(e.target.value)} className="pl-9 bg-background" />
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
           </div>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchData}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
+          >
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-muted/40 text-muted-foreground font-heading border-b border-border">
-              {table.getHeaderGroups().map(hg => <tr key={hg.id}>{hg.headers.map(h => <th key={h.id} className="px-6 py-4 font-semibold">{flexRender(h.column.columnDef.header, h.getContext())}</th>)}</tr>)}
-            </thead>
-            <tbody className="divide-y divide-border">
-              {table.getRowModel().rows.map(row => <tr key={row.id} className="hover:bg-muted/10">{row.getVisibleCells().map(cell => <td key={cell.id} className="px-6 py-4">{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}
-            </tbody>
-          </table>
+      )}
+
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
+        <div className='p-4 border-b border-border bg-muted/20'>
+          <SearchInput
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder='Cari No. Invoice atau nama customer...'
+            className='w-full sm:max-w-sm'
+          />
         </div>
+
+        <DataTable
+          columns={columns}
+          data={filteredData}
+          isLoading={isLoading}
+          emptyMessage='Tidak ada data invoice.'
+        />
       </div>
 
-      {/* Dialog Form Lebar */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-5xl bg-card p-0 overflow-hidden">
-          <div className="flex flex-col lg:flex-row h-[85vh] lg:h-[650px]">
-            {/* Sisi Kiri: Form Input & Pemilihan Data */}
-            <div className="flex-1 p-6 overflow-y-auto custom-scrollbar border-r border-border">
-              <DialogHeader className="mb-6"><DialogTitle className="font-heading text-xl flex items-center gap-2"><Receipt className="w-5 h-5 text-primary"/> Generate Invoice Baru</DialogTitle></DialogHeader>
-              <form id="invoice-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                
-                {/* Referensi Dasar */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-xs font-bold text-primary">Pilih Customer</label>
-                    <select {...form.register("customer_id")} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-primary">
-                      <option value="">-- Pilih Customer --</option>
-                      <option value="1">PT. Industri Maju Abadi (Kontrak: Top Up)</option>
-                      <option value="2">PT. Tekno Pangan (Kontrak: Deposit)</option>
-                    </select>
-                    {form.formState.errors.customer_id && <p className="text-[10px] text-destructive">{form.formState.errors.customer_id.message}</p>}
-                  </div>
-                  <div className="space-y-1"><label className="text-xs font-medium">No. Invoice</label><Input {...form.register("invoice_number")} placeholder="INV/XXX/..." /></div>
-                  <div className="space-y-1"><label className="text-xs font-medium">Tanggal Invoice</label><Input type="date" {...form.register("date")} /></div>
-                  <div className="space-y-1"><label className="text-xs font-medium">No. PO Referensi</label><Input {...form.register("po_number")} /></div>
-                  <div className="space-y-1"><label className="text-xs font-medium">Tanggal PO</label><Input type="date" {...form.register("po_date")} /></div>
-                  <div className="space-y-1"><label className="text-xs font-medium">Periode Mulai</label><Input type="date" {...form.register("period_start")} /></div>
-                  <div className="space-y-1"><label className="text-xs font-medium">Periode Selesai</label><Input type="date" {...form.register("period_end")} /></div>
-                </div>
-
-                {/* List Pemakaian (Muncul Jika Customer Dipilih) */}
-                {watchValues.customer_id === "1" && (
-                  <div className="space-y-3 pt-4 border-t border-border">
-                    <label className="text-sm font-bold uppercase text-muted-foreground tracking-wider flex justify-between">
-                      List Riwayat Pemakaian <Badge variant="secondary">{mockUnbilledUsages.length} Belum Ditagih</Badge>
-                    </label>
-                    <div className="space-y-2">
-                      {mockUnbilledUsages.map(usage => (
-                        <div key={usage.id} className="flex items-center space-x-3 bg-muted/30 p-3 rounded-lg border border-border hover:border-primary/50 transition-colors">
-                          <input 
-                            type="checkbox" 
-                            id={`usage-${usage.id}`}
-                            className="w-4 h-4 text-primary rounded border-border focus:ring-primary bg-background"
-                            checked={(watchValues.selected_usages || []).includes(usage.id)}
-                            onChange={(e) => handleToggleUsage(usage.id, e.target.checked)}
-                          />
-                          <div className="flex-1">
-                            <label htmlFor={`usage-${usage.id}`} className="text-sm font-semibold cursor-pointer">{usage.id} <span className="text-xs text-muted-foreground ml-2 font-normal">{usage.date}</span></label>
-                            <p className="text-xs text-muted-foreground">{usage.metode} • Volume: {usage.volume}</p>
-                          </div>
-                          <div className="font-mono text-sm font-semibold text-emerald-500">Rp {usage.amount.toLocaleString('id-ID')}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {form.formState.errors.selected_usages && <p className="text-xs text-destructive">{form.formState.errors.selected_usages.message}</p>}
-                  </div>
-                )}
-
-                <div className="space-y-1 pt-2">
-                  <label className="text-xs font-medium">Catatan / Note</label>
-                  <Input {...form.register("note")} placeholder="Tambahkan catatan untuk customer jika ada..." />
-                </div>
-              </form>
-            </div>
-
-            {/* Sisi Kanan: Panel Tagihan Realtime */}
-            <div className="w-full lg:w-[380px] bg-sidebar/50 p-6 flex flex-col justify-between sidebar-gradient-dark">
-              <div>
-                <div className="flex items-center gap-2 mb-6">
-                  <Calculator className="w-5 h-5 text-primary" />
-                  <h3 className="font-heading font-semibold text-lg">Kalkulasi Tagihan</h3>
-                </div>
-                
-                {watchValues.customer_id === "1" ? (
-                  <div className="space-y-4">
-                    <div className="bg-background/80 p-3 rounded-lg border border-border flex justify-between items-center">
-                      <span className="text-xs text-muted-foreground font-medium">Total Pemakaian</span>
-                      <span className="text-sm font-mono font-bold">Rp {totalPemakaian.toLocaleString('id-ID')}</span>
-                    </div>
-
-                    {/* Logika Tampil Potongan Deposit (Top-Up) */}
-                    {mockCustomerInfo.contract_type === "Top Up" ? (
-                      <div className="bg-rose-500/10 p-3 rounded-lg border border-rose-500/20">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs text-rose-500 font-bold">Potongan Saldo Deposit</span>
-                          <span className="text-sm font-mono font-bold text-rose-500">- Rp {potonganDeposit.toLocaleString('id-ID')}</span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">Sistem kontrak Top-Up. Saldo aktif saat ini: Rp {mockCustomerInfo.current_deposit_balance.toLocaleString('id-ID')}</p>
-                      </div>
-                    ) : (
-                      <div className="bg-muted p-3 rounded-lg border border-border">
-                        <p className="text-xs text-muted-foreground">Sistem kontrak <span className="font-bold">Jaminan Deposit</span>. Tagihan dibayar penuh tanpa pemotongan saldo.</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg bg-background/50">
-                    <p className="text-sm">Pilih customer untuk melihat kalkulasi.</p>
-                  </div>
-                )}
-
-                <div className="mt-8 pt-6 border-t border-border border-dashed">
-                  <p className="text-xs text-muted-foreground mb-2 flex items-center justify-between">
-                    Total Tagihan Akhir
-                    {totalPemakaian > 0 && <Badge variant="outline" className="text-emerald-500 border-emerald-500/30">Siap Cetak</Badge>}
-                  </p>
-                  <p className="text-3xl font-heading font-bold text-foreground break-all">
-                    Rp {tagihanAkhir.toLocaleString('id-ID')}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-8 pt-4">
-                <Button type="submit" form="invoice-form" className="w-full h-12 text-md font-semibold bg-primary hover:bg-primary/90 text-white" disabled={form.formState.isSubmitting || totalPemakaian === 0}>
-                  {form.formState.isSubmitting ? "Memproses..." : "Simpan & Generate Invoice"}
-                </Button>
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={editingId ? 'Edit Invoice' : 'Terbitkan Invoice Baru'}
+        size='lg'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsDialogOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='invoice-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Invoice'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='invoice-form'
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='space-y-6 py-2'
+        >
+          <div className='space-y-4'>
+            <h3 className='text-sm font-bold uppercase text-muted-foreground tracking-wider border-b border-border/60 pb-2'>
+              Informasi Dokumen
+            </h3>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
+              <Select
+                label='Customer'
+                required
+                options={customers}
+                value={form.watch('customer_id')}
+                onChange={(val) => form.setValue('customer_id', val)}
+                error={form.formState.errors.customer_id?.message}
+              />
+              <Input
+                label='Nomor Invoice'
+                placeholder='INV/2026/...'
+                error={form.formState.errors.invoice_number?.message}
+                {...form.register('invoice_number')}
+              />
+              <DatePicker
+                label='Tanggal Penerbitan'
+                value={form.watch('date')}
+                onChange={(val) => form.setValue('date', val)}
+                error={form.formState.errors.date?.message}
+              />
+              <div className='grid grid-cols-2 gap-3'>
+                <Input
+                  label='Nomor PO'
+                  placeholder='PO-123'
+                  {...form.register('po_number')}
+                />
+                <DatePicker
+                  label='Tanggal PO'
+                  value={form.watch('po_date')}
+                  onChange={(val) => form.setValue('po_date', val)}
+                />
               </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          <div className='space-y-4'>
+            <h3 className='text-sm font-bold uppercase text-muted-foreground tracking-wider border-b border-border/60 pb-2'>
+              Periode & Tagihan
+            </h3>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
+              <DatePicker
+                label='Periode Mulai'
+                value={form.watch('period_start')}
+                onChange={(val) => form.setValue('period_start', val)}
+              />
+              <DatePicker
+                label='Periode Selesai'
+                value={form.watch('period_end')}
+                onChange={(val) => form.setValue('period_end', val)}
+              />
+
+              <NumberInput
+                label='Total Nominal Pemakaian (Rp)'
+                value={form.watch('total_usage')}
+                onChange={(val) => form.setValue('total_usage', val)}
+              />
+              <NumberInput
+                label='Potongan Deposit (Rp)'
+                value={form.watch('deposit_deduction')}
+                onChange={(val) => form.setValue('deposit_deduction', val)}
+                className='text-amber-500'
+              />
+
+              <div className='col-span-1 md:col-span-2 bg-primary/5 border border-primary/20 p-4 rounded-xl mt-2'>
+                <NumberInput
+                  label='Total Tagihan Akhir (Rp)'
+                  value={form.watch('total_bill')}
+                  onChange={(val) => form.setValue('total_bill', val)}
+                  className='text-lg font-bold text-emerald-600'
+                  disabled
+                />
+                <p className='text-[10px] text-muted-foreground mt-2 font-medium'>
+                  *Kalkulasi otomatis: Total Pemakaian dikurangi Potongan
+                  Deposit.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <Textarea
+            label='Catatan Tambahan'
+            placeholder='Catatan opsional untuk invoice ini...'
+            rows={3}
+            {...form.register('note')}
+          />
+        </form>
+      </Modal>
+
+      <AlertDialog
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus invoice ini? Tindakan ini tidak
+              dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
