@@ -1,5 +1,4 @@
 'use client';
-
 import {
   Area,
   AreaChart,
@@ -17,16 +16,7 @@ import {
   CardDescription,
 } from '@/components/ui/card';
 
-const data = [
-  { month: 'Jan', pengisian: 42000, pemakaian: 38000 },
-  { month: 'Feb', pengisian: 45000, pemakaian: 41000 },
-  { month: 'Mar', pengisian: 48000, pemakaian: 46000 },
-  { month: 'Apr', pengisian: 43000, pemakaian: 44000 },
-  { month: 'Mei', pengisian: 50000, pemakaian: 48000 },
-  { month: 'Jun', pengisian: 55000, pemakaian: 52000 },
-];
-
-export function TrendChart() {
+export function TrendChart({ data }: { data: any[] }) {
   return (
     <Card className='bg-card border-border shadow-sm'>
       <CardHeader>
@@ -34,7 +24,7 @@ export function TrendChart() {
           Tren Volume Gas (Sm³)
         </CardTitle>
         <CardDescription>
-          Komparasi pengisian vs pemakaian 6 bulan terakhir
+          Komparasi pengisian vs pemakaian tahun ini
         </CardDescription>
       </CardHeader>
       <CardContent className='h-[300px] w-full mt-4'>

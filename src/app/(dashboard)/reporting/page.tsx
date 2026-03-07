@@ -4,9 +4,12 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, Download, Filter } from 'lucide-react';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Select } from '@/components/form/Select';
+import { DatePicker } from '@/components/form/DatePicker';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function ReportingPage() {
@@ -15,43 +18,20 @@ export default function ReportingPage() {
   const [dateEnd, setDateEnd] = useState('');
   const [isExporting, setIsExporting] = useState(false);
 
-  // --- MOCK DATA UNTUK LAPORAN ---
-  const dummyDataPemakaian = [
-    {
-      Tanggal: '2025-10-24',
-      Customer: 'PT. Industri Maju',
-      Metode: 'Delta Pressure',
-      'Volume (Sm3)': 4500,
-      MMBTU: 158.2,
-      'Total Tagihan': 18500000,
-      Mata_Uang: 'IDR',
-    },
-    {
-      Tanggal: '2025-10-25',
-      Customer: 'PT. Tekno Pangan',
-      Metode: 'EVC',
-      'Volume (Sm3)': 2100,
-      MMBTU: 0,
-      'Total Tagihan': 4500,
-      Mata_Uang: 'USD',
-    },
+  const reportOptions = [
+    { label: 'Laporan Pemakaian Gas (Customer)', value: 'pemakaian' },
+    { label: 'Laporan Pengisian Gas (Supplier)', value: 'pengisian' },
+    { label: 'Rekap Tagihan Invoice', value: 'invoice' },
+    { label: 'Rekap Pengeluaran Kas (Expenses)', value: 'expense' },
   ];
 
-  const dummyDataPengisian = [
-    {
-      Tanggal: '2025-10-24',
-      Supplier: 'PT. Gas Bumi',
-      No_DO: 'DO/1024/01',
-      Plat_Nomor: 'B 9012 CXY',
-      'Volume (MMBTU)': 1450.5,
-      'Total Nilai': 45000000,
-    },
-  ];
-
-  // --- LOGIKA EXPORT SHEETJS ---
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (!dateStart || !dateEnd) {
       toast.error('Pilih rentang tanggal terlebih dahulu.');
+      return;
+    }
+    if (new Date(dateStart) > new Date(dateEnd)) {
+      toast.error('Tanggal awal tidak boleh lebih besar dari tanggal akhir.');
       return;
     }
 
@@ -62,37 +42,130 @@ export default function ReportingPage() {
       let sheetName = '';
       let fileName = '';
 
-      // Tentukan data berdasarkan jenis laporan yang dipilih
       if (reportType === 'pemakaian') {
-        dataToExport = dummyDataPemakaian;
-        sheetName = 'Laporan Pemakaian';
-        fileName = `Laporan_Pemakaian_Customer_${dateStart}_to_${dateEnd}.xlsx`;
+        const [dpRes, evcRes, turbinRes] = await Promise.all([
+          api.get<any>('/v1/usage-delta-pressures'),
+          api.get<any>('/v1/usage-evcs'),
+          api.get<any>('/v1/usage-turbines'),
+        ]);
+
+        const allUsage = [
+          ...(Array.isArray(dpRes.data) ? dpRes.data : dpRes.data?.rows || []),
+          ...(Array.isArray(evcRes.data)
+            ? evcRes.data
+            : evcRes.data?.rows || []),
+          ...(Array.isArray(turbinRes.data)
+            ? turbinRes.data
+            : turbinRes.data?.rows || []),
+        ];
+
+        const filtered = allUsage.filter((d) => {
+          if (!d.date) return false;
+          const tgl = new Date(d.date).toISOString().split('T')[0];
+          return tgl >= dateStart && tgl <= dateEnd;
+        });
+
+        dataToExport = filtered.map((d) => ({
+          'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
+          'ID Customer': d.customer_id,
+          'Metode':
+            d.evc_difference_sm3 !== undefined
+              ? 'EVC'
+              : d.turbine_difference !== undefined
+                ? 'Turbin'
+                : 'Delta Pressure',
+          'Volume (Sm3)': d.total_sm3 || d.evc_difference_sm3 || 0,
+          'MMBTU': d.mmbtu || 0,
+          'Total Tagihan': d.total_sales || 0,
+          'Mata Uang': d.currency || 'IDR',
+        }));
+
+        sheetName = 'Lap_Pemakaian';
+        fileName = `Laporan_Pemakaian_${dateStart}_${dateEnd}.xlsx`;
       } else if (reportType === 'pengisian') {
-        dataToExport = dummyDataPengisian;
-        sheetName = 'Laporan Pengisian';
-        fileName = `Laporan_Pengisian_Supplier_${dateStart}_to_${dateEnd}.xlsx`;
+        const res = await api.get<any>('/v1/purchases');
+        const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
+        const filtered = list.filter((d) => {
+          if (!d.date) return false;
+          const tgl = new Date(d.date).toISOString().split('T')[0];
+          return tgl >= dateStart && tgl <= dateEnd;
+        });
+
+        dataToExport = filtered.map((d) => ({
+          'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
+          'Nomor DO': d.do_number || '-',
+          'ID Supplier': d.supplier_id,
+          'Plat Nomor': d.license_plate,
+          'Volume (MMSCF)': d.volume_mmscf,
+          'Volume (MMBTU)': d.volume_mmbtu,
+          'Total Harga': d.total_sales,
+          'Mata Uang': d.currency,
+        }));
+
+        sheetName = 'Lap_Pengisian';
+        fileName = `Laporan_Pengisian_${dateStart}_${dateEnd}.xlsx`;
+      } else if (reportType === 'invoice') {
+        const res = await api.get<any>('/v1/invoices');
+        const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
+        const filtered = list.filter((d) => {
+          if (!d.date) return false;
+          const tgl = new Date(d.date).toISOString().split('T')[0];
+          return tgl >= dateStart && tgl <= dateEnd;
+        });
+
+        dataToExport = filtered.map((d) => ({
+          'Tanggal Terbit': format(new Date(d.date), 'dd/MM/yyyy'),
+          'No. Invoice': d.invoice_number,
+          'ID Customer': d.customer_id,
+          'Pemakaian Kotor': d.total_usage,
+          'Potongan Deposit': d.deposit_deduction,
+          'Tagihan Bersih': d.total_bill,
+        }));
+
+        sheetName = 'Lap_Invoice';
+        fileName = `Laporan_Invoice_${dateStart}_${dateEnd}.xlsx`;
+      } else if (reportType === 'expense') {
+        const res = await api.get<any>('/v1/expenses');
+        const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
+        const filtered = list.filter((d) => {
+          if (!d.date) return false;
+          const tgl = new Date(d.date).toISOString().split('T')[0];
+          return tgl >= dateStart && tgl <= dateEnd;
+        });
+
+        dataToExport = filtered.map((d) => ({
+          'Tanggal': format(new Date(d.date), 'dd/MM/yyyy'),
+          'Tipe': d.expense_type,
+          'Deskripsi': d.description,
+          'Total Pengeluaran': d.total,
+          'Metode Pembayaran': d.payment_method,
+        }));
+
+        sheetName = 'Lap_Pengeluaran';
+        fileName = `Laporan_Pengeluaran_${dateStart}_${dateEnd}.xlsx`;
       }
 
-      // 1. Buat Worksheet dari JSON
-      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      if (dataToExport.length === 0) {
+        toast.info('Tidak ada data ditemukan pada rentang tanggal tersebut.');
+        setIsExporting(false);
+        return;
+      }
 
-      // (Opsional) Styling lebar kolom
-      const wscols = Object.keys(dataToExport[0] || {}).map(() => ({
-        wch: 20,
-      }));
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const wscols = Object.keys(dataToExport[0]).map(() => ({ wch: 20 }));
       worksheet['!cols'] = wscols;
 
-      // 2. Buat Workbook dan append Worksheet
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-
-      // 3. Trigger Download
       XLSX.writeFile(workbook, fileName);
 
       toast.success('File Excel berhasil diunduh.');
     } catch (error) {
       console.error(error);
-      toast.error('Gagal melakukan export data.');
+      toast.error('Gagal melakukan penarikan data dari server.');
     } finally {
       setIsExporting(false);
     }
@@ -101,90 +174,82 @@ export default function ReportingPage() {
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
       <div>
-        <h2 className='text-2xl font-heading font-bold flex items-center gap-2'>
+        <h2 className='text-2xl font-heading font-bold flex items-center gap-2 text-foreground tracking-tight'>
           <FileSpreadsheet className='w-6 h-6 text-primary' /> Laporan & Export
+          Data
         </h2>
         <p className='text-sm text-muted-foreground mt-1'>
-          Generate laporan rekapitulasi operasional dan keuangan dalam format
-          Excel (.xlsx).
+          Tarik data operasional dan keuangan dari database dan ekspor ke format
+          Microsoft Excel (.xlsx).
         </p>
       </div>
 
-      <Card className='bg-card border-border shadow-sm max-w-3xl'>
-        <CardHeader className='bg-muted/20 border-b border-border pb-4'>
+      <Card className='bg-card border-border shadow-soft-depth max-w-3xl overflow-hidden'>
+        <CardHeader className='bg-muted/10 border-b border-border pb-4'>
           <CardTitle className='text-lg flex items-center gap-2'>
-            <Filter className='w-4 h-4' /> Parameter Laporan
+            <Filter className='w-4 h-4 text-primary' /> Parameter Ekstraksi Data
           </CardTitle>
         </CardHeader>
         <CardContent className='pt-6 space-y-6'>
           <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
-            <div className='space-y-2'>
-              <label className='text-sm font-bold text-foreground'>
-                Jenis Laporan
-              </label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className='flex h-10 w-full rounded-md border-2 border-primary/50 bg-background px-3 py-1 font-medium text-foreground focus-visible:border-primary focus-visible:outline-none'
-              >
-                <option value='pemakaian'>
-                  Laporan Pemakaian per Customer
-                </option>
-                <option value='pengisian'>
-                  Laporan Pengisian per Supplier
-                </option>
-                <option value='deposit'>Rekap Deposit Customer</option>
-                <option value='keuangan'>Laporan Keuangan (Laba Rugi)</option>
-              </select>
-            </div>
-
-            <div className='space-y-2'>
-              <label className='text-sm font-bold text-foreground'>
+            <Select
+              label='Jenis Laporan (Sumber Modul)'
+              options={reportOptions}
+              value={reportType}
+              onChange={(val) => setReportType(val)}
+            />
+            <div className='space-y-1.5 w-full'>
+              <label className='text-xs font-bold text-foreground uppercase tracking-wider'>
                 Rentang Waktu
               </label>
-              <div className='flex items-center gap-2'>
-                <Input
-                  type='date'
-                  value={dateStart}
-                  onChange={(e) => setDateStart(e.target.value)}
-                  className='w-full'
-                />
-                <span className='text-muted-foreground text-xs'>s/d</span>
-                <Input
-                  type='date'
-                  value={dateEnd}
-                  onChange={(e) => setDateEnd(e.target.value)}
-                  className='w-full'
-                />
+              <div className='flex items-center gap-2 pt-1'>
+                <div className='w-full'>
+                  <DatePicker
+                    value={dateStart}
+                    onChange={(val) => setDateStart(val)}
+                    placeholder='Tgl Awal'
+                  />
+                </div>
+                <span className='text-muted-foreground text-xs font-semibold'>
+                  s/d
+                </span>
+                <div className='w-full'>
+                  <DatePicker
+                    value={dateEnd}
+                    onChange={(val) => setDateEnd(val)}
+                    placeholder='Tgl Akhir'
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className='p-4 bg-muted/30 border border-border rounded-lg text-sm text-muted-foreground flex items-start gap-3'>
+          <div className='p-4 bg-muted/30 border border-border rounded-xl text-sm text-muted-foreground flex items-start gap-3'>
             <div className='mt-0.5'>
               <FileSpreadsheet className='w-5 h-5 text-emerald-500' />
             </div>
-            <p>
-              Data akan di-export secara raw ke dalam format Microsoft Excel
-              menggunakan <strong className='text-foreground'>SheetJS</strong>.
-              Pastikan Anda telah memilih rentang waktu yang sesuai agar ukuran
-              file tidak terlalu besar.
+            <p className='leading-relaxed'>
+              Sistem akan memanggil data mentah secara <i>live</i> dari
+              database. Data dapat diolah kembali menggunakan PivotTable di
+              Excel.
             </p>
           </div>
 
-          <Button
-            onClick={exportToExcel}
-            disabled={isExporting}
-            className='w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white shadow-md h-11 px-8'
-          >
-            {isExporting ? (
-              'Memproses Data...'
-            ) : (
-              <>
-                <Download className='w-4 h-4 mr-2' /> Export to Excel
-              </>
-            )}
-          </Button>
+          <div className='pt-2 border-t border-border/50'>
+            <Button
+              onClick={exportToExcel}
+              disabled={isExporting}
+              className='w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white shadow-md h-11 px-8 font-bold tracking-wide'
+            >
+              {isExporting ? (
+                'Memproses Data...'
+              ) : (
+                <>
+                  <Download className='w-4 h-4 mr-2' /> Export to Excel (.xlsx)
+                </>
+              )}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
