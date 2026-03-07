@@ -1,106 +1,173 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
-import {
-  Search,
   Plus,
-  Edit2,
-  Trash2,
   Users,
-  MoreHorizontal,
+  RefreshCcw,
+  AlertCircle,
+  ArrowUpDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
 
-import { Employee, EmployeeFormValues, employeeSchema } from '@/types/master';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
-const dummyEmployees: Employee[] = [
-  {
-    id: '1',
-    name: 'Ahmad Sujatmiko',
-    nik: '3273112233445566',
-    position: 'Driver GTM',
-    phone_number: '08123456789',
-    status: 'Aktif',
-  },
-  {
-    id: '2',
-    name: 'Benny Setiawan',
-    nik: '3273998877665544',
-    position: 'Operator Mother Station',
-    phone_number: '08198765432',
-    status: 'Aktif',
-  },
-  {
-    id: '3',
-    name: 'Siti Aminah',
-    nik: '3273123456789012',
-    position: 'Finance',
-    phone_number: '081566778899',
-    status: 'Nonaktif',
-  },
-];
+/**
+ * Skema validasi form Karyawan menggunakan Zod.
+ * Disesuaikan dengan CreateEmployeeDto dari backend.
+ */
+const employeeSchema = z.object({
+  name: z.string().min(3, { message: 'Nama Karyawan minimal 3 karakter' }),
+  nik: z.string().optional(),
+});
+
+type EmployeeFormValues = z.infer<typeof employeeSchema>;
+
+export interface Employee extends EmployeeFormValues {
+  id: string;
+}
 
 const columnHelper = createColumnHelper<Employee>();
 
+/**
+ * Halaman manajemen master data Karyawan.
+ * Terintegrasi dengan endpoint CRUD /v1/employees.
+ *
+ * @returns {JSX.Element} Komponen UI halaman Karyawan
+ */
 export default function KaryawanPage() {
-  const [data, setData] = useState<Employee[]>(dummyEmployees);
+  const [data, setData] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
-    defaultValues: { name: '', nik: '', position: '', phone_number: '' },
+    defaultValues: { name: '', nik: '' },
   });
 
+  /**
+   * Mengambil list data karyawan menggunakan endpoint GET /v1/employees.
+   *
+   * @returns {Promise<void>}
+   */
+  const fetchEmployees = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<any>('/v1/employees');
+      const fetchedData = Array.isArray(res.data)
+        ? res.data
+        : res.data?.rows || [];
+      setData(fetchedData);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data karyawan dari server.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEmployees();
+  }, [fetchEmployees]);
+
+  /**
+   * Mempersiapkan form dan membuka modal dialog untuk mode Create atau Update.
+   *
+   * @param {Employee} [employee] - Data entitas karyawan yang akan diedit (opsional)
+   */
   const handleOpenDialog = (employee?: Employee) => {
     if (employee) {
       setEditingId(employee.id);
-      form.reset({ ...employee });
+      form.reset({
+        name: employee.name,
+        nik: employee.nik || '',
+      });
     } else {
       setEditingId(null);
-      form.reset({ name: '', nik: '', position: '', phone_number: '' });
+      form.reset({ name: '', nik: '' });
     }
     setIsDialogOpen(true);
   };
 
+  /**
+   * Mengirim payload form ke backend untuk proses penambahan (POST) atau pembaruan (PUT) data.
+   *
+   * @param {EmployeeFormValues} values - Nilai input dari form
+   */
   const onSubmit = async (values: EmployeeFormValues) => {
-    await new Promise((res) => setTimeout(res, 400));
-    toast.success(
-      `Karyawan berhasil ${editingId ? 'diperbarui' : 'ditambahkan'}`,
-    );
-    setIsDialogOpen(false);
+    try {
+      if (editingId) {
+        await api.put(`/v1/employees/${editingId}`, values);
+        toast.success('Data karyawan berhasil diperbarui.');
+      } else {
+        await api.post('/v1/employees', values);
+        toast.success('Karyawan baru berhasil ditambahkan.');
+      }
+      setIsDialogOpen(false);
+      fetchEmployees();
+    } catch (err: any) {
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan data.');
+    }
+  };
+
+  /**
+   * Mengirim request DELETE ke backend berdasarkan ID entitas yang disorot.
+   */
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/v1/employees/${deletingId}`);
+      toast.success('Karyawan berhasil dihapus.');
+      fetchEmployees();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus data.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
   };
 
   const columns = useMemo(
     () => [
       columnHelper.accessor('name', {
-        header: 'Nama Karyawan',
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Nama Karyawan <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
           <div className='flex items-center gap-2'>
             <Users className='w-4 h-4 text-muted-foreground' />
@@ -111,162 +178,161 @@ export default function KaryawanPage() {
         ),
       }),
       columnHelper.accessor('nik', {
-        header: 'NIK KTP',
-        cell: (info) => (
-          <span className='font-mono text-sm'>{info.getValue()}</span>
-        ),
-      }),
-      columnHelper.accessor('position', { header: 'Jabatan' }),
-      columnHelper.accessor('phone_number', { header: 'No. Handphone' }),
-      columnHelper.accessor('status', {
-        header: 'Status',
-        cell: (info) => (
-          <Badge
-            variant={info.getValue() === 'Aktif' ? 'default' : 'secondary'}
-            className={info.getValue() === 'Aktif' ? 'bg-emerald-500' : ''}
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
           >
-            {info.getValue()}
-          </Badge>
+            NIK <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='font-mono text-sm tracking-wide'>
+            {info.getValue() || '-'}
+          </span>
         ),
       }),
       columnHelper.display({
         id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon' className='h-8 w-8'>
-                <MoreHorizontal className='h-4 w-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='bg-card border-border'>
-              <DropdownMenuItem
-                onClick={() => handleOpenDialog(info.row.original)}
-                className='cursor-pointer'
-              >
-                <Edit2 className='mr-2 h-4 w-4' /> Edit Karyawan
-              </DropdownMenuItem>
-              <DropdownMenuItem className='cursor-pointer text-destructive focus:text-destructive'>
-                <Trash2 className='mr-2 h-4 w-4' /> Nonaktifkan
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TableActions
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
+          />
         ),
       }),
     ],
     [],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-  });
-
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
-      <div className='flex flex-col sm:flex-row justify-between gap-4'>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className='text-2xl font-heading font-bold'>Master Karyawan</h2>
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
+            Master Karyawan
+          </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Data referensi pegawai untuk modul Payroll dan Kasbon.
           </p>
         </div>
         <Button
           onClick={() => handleOpenDialog()}
-          className='bg-primary text-white'
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
         >
           <Plus className='w-4 h-4 mr-2' /> Tambah Karyawan
         </Button>
       </div>
 
-      <div className='bg-card border border-border rounded-xl shadow-sm overflow-hidden'>
-        <div className='p-4 border-b border-border bg-muted/20'>
-          <div className='relative w-full max-w-sm'>
-            <Search className='absolute left-3 top-2.5 h-4 w-4 text-muted-foreground' />
-            <Input
-              placeholder='Cari karyawan atau NIK...'
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className='pl-9 bg-background'
-            />
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
           </div>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchEmployees}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
+          >
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
         </div>
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm text-left'>
-            <thead className='bg-muted/40 text-muted-foreground font-heading border-b border-border'>
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((h) => (
-                    <th key={h.id} className='px-6 py-4 font-semibold'>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className='hover:bg-muted/10'>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className='px-6 py-4'>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      )}
+
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
+        <div className='p-4 border-b border-border bg-muted/20'>
+          <SearchInput
+            value={globalFilter ?? ''}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder='Cari nama atau NIK...'
+            className='w-full sm:max-w-sm'
+          />
         </div>
+
+        <DataTable
+          columns={columns}
+          data={data}
+          isLoading={isLoading}
+          emptyMessage='Tidak ada data karyawan yang ditemukan.'
+        />
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className='sm:max-w-[400px] bg-card'>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Karyawan' : 'Tambah Karyawan'}
-            </DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className='space-y-4 mt-2'
-          >
-            <div className='space-y-1'>
-              <label className='text-xs font-medium'>Nama Lengkap</label>
-              <Input {...form.register('name')} />
-            </div>
-            <div className='space-y-1'>
-              <label className='text-xs font-medium'>NIK KTP (16 Digit)</label>
-              <Input {...form.register('nik')} maxLength={16} />
-            </div>
-            <div className='space-y-1'>
-              <label className='text-xs font-medium'>Jabatan</label>
-              <Input
-                {...form.register('position')}
-                placeholder='Contoh: Finance / Driver'
-              />
-            </div>
-            <div className='space-y-1'>
-              <label className='text-xs font-medium'>Nomor Handphone</label>
-              <Input {...form.register('phone_number')} />
-            </div>
-            <DialogFooter className='pt-4'>
-              <Button
-                type='submit'
-                className='w-full bg-primary text-white'
-                disabled={form.formState.isSubmitting}
-              >
-                Simpan Data
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={editingId ? 'Edit Data Karyawan' : 'Tambah Karyawan Baru'}
+        size='md'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsDialogOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='employee-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='employee-form'
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='space-y-5 py-2'
+        >
+          <Input
+            label='Nama Lengkap'
+            required
+            placeholder='Nama karyawan'
+            error={form.formState.errors.name?.message}
+            {...form.register('name')}
+          />
+          <Input
+            label='NIK (Opsional)'
+            placeholder='Nomor Induk Kependudukan / Karyawan'
+            error={form.formState.errors.nik?.message}
+            {...form.register('nik')}
+          />
+        </form>
+      </Modal>
+
+      <AlertDialog
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus data karyawan ini? Tindakan ini
+              tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,74 +1,105 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
-import {
-  Search,
   Plus,
-  Edit2,
-  Trash2,
   Truck,
-  MoreHorizontal,
+  RefreshCcw,
+  AlertCircle,
+  ArrowUpDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { api } from '@/lib/api';
 import { Driver, DriverFormValues, driverSchema } from '@/types/master';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-
-const dummyDrivers: Driver[] = [
-  {
-    id: '1',
-    name: 'Ahmad Sujatmiko',
-    nik: '3273112233445566',
-    phone_number: '08123456789',
-  },
-  {
-    id: '2',
-    name: 'Benny Setiawan',
-    nik: '3273998877665544',
-    phone_number: '08198765432',
-  },
-];
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const columnHelper = createColumnHelper<Driver>();
 
+/**
+ * Halaman manajemen master data Driver.
+ * Terintegrasi dengan endpoint CRUD /v1/drivers.
+ *
+ * @returns {JSX.Element} Komponen UI halaman Driver
+ */
 export default function DriverPage() {
-  const [data, setData] = useState<Driver[]>(dummyDrivers);
+  const [data, setData] = useState<Driver[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const form = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', nik: '', phone_number: '' },
+    defaultValues: {
+      name: '',
+      nik: '',
+      phone_number: '',
+    },
   });
 
+  /**
+   * Mengambil list data driver menggunakan endpoint GET /v1/drivers.
+   *
+   * @returns {Promise<void>}
+   */
+  const fetchDrivers = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<any>('/v1/drivers');
+      const fetchedData = Array.isArray(res.data)
+        ? res.data
+        : res.data?.rows || [];
+      setData(fetchedData);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data driver dari server.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDrivers();
+  }, [fetchDrivers]);
+
+  /**
+   * Mempersiapkan form dan membuka modal dialog untuk mode Create atau Update.
+   *
+   * @param {Driver} [driver] - Data entitas driver yang akan diedit (opsional)
+   */
   const handleOpenDialog = (driver?: Driver) => {
     if (driver) {
       setEditingId(driver.id);
-      form.reset({ ...driver });
+      form.reset({
+        name: driver.name,
+        nik: driver.nik,
+        phone_number: driver.phone_number,
+      });
     } else {
       setEditingId(null);
       form.reset({ name: '', nik: '', phone_number: '' });
@@ -76,18 +107,57 @@ export default function DriverPage() {
     setIsDialogOpen(true);
   };
 
+  /**
+   * Mengirim payload form ke backend untuk proses penambahan (POST) atau pembaruan (PUT) data.
+   *
+   * @param {DriverFormValues} values - Nilai input dari form
+   */
   const onSubmit = async (values: DriverFormValues) => {
-    await new Promise((res) => setTimeout(res, 400));
-    toast.success(
-      `Driver berhasil ${editingId ? 'diperbarui' : 'ditambahkan'}`,
-    );
-    setIsDialogOpen(false);
+    try {
+      if (editingId) {
+        await api.put(`/v1/drivers/${editingId}`, values);
+        toast.success('Data driver berhasil diperbarui.');
+      } else {
+        await api.post('/v1/drivers', values);
+        toast.success('Driver baru berhasil ditambahkan.');
+      }
+      setIsDialogOpen(false);
+      fetchDrivers();
+    } catch (err: any) {
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan data.');
+    }
+  };
+
+  /**
+   * Mengirim request DELETE ke backend berdasarkan ID entitas yang disorot.
+   */
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/v1/drivers/${deletingId}`);
+      toast.success('Driver berhasil dihapus.');
+      fetchDrivers();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus data.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
   };
 
   const columns = useMemo(
     () => [
       columnHelper.accessor('name', {
-        header: 'Nama Driver',
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Nama Driver <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
           <div className='flex items-center gap-2'>
             <Truck className='w-4 h-4 text-muted-foreground' />
@@ -98,161 +168,178 @@ export default function DriverPage() {
         ),
       }),
       columnHelper.accessor('nik', {
-        header: 'NIK KTP',
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            NIK KTP <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
-          <span className='font-mono text-sm'>{info.getValue()}</span>
+          <span className='font-mono text-sm tracking-wide'>
+            {info.getValue()}
+          </span>
         ),
       }),
       columnHelper.accessor('phone_number', {
         header: 'No. Handphone',
+        cell: (info) => (
+          <span className='font-mono text-muted-foreground'>
+            {info.getValue()}
+          </span>
+        ),
       }),
       columnHelper.display({
         id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon' className='h-8 w-8'>
-                <MoreHorizontal className='h-4 w-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='bg-card border-border'>
-              <DropdownMenuItem
-                onClick={() => handleOpenDialog(info.row.original)}
-                className='cursor-pointer'
-              >
-                <Edit2 className='mr-2 h-4 w-4' /> Edit Driver
-              </DropdownMenuItem>
-              <DropdownMenuItem className='cursor-pointer text-destructive focus:text-destructive'>
-                <Trash2 className='mr-2 h-4 w-4' /> Hapus
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TableActions
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
+          />
         ),
       }),
     ],
     [],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-  });
-
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
-      <div className='flex flex-col sm:flex-row justify-between gap-4'>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className='text-2xl font-heading font-bold'>Master Driver</h2>
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
+            Master Driver
+          </h2>
           <p className='text-sm text-muted-foreground mt-1'>
-            Data pengemudi operasional GTM.
+            Kelola data pengemudi armada (GTM) dan identitas terkait.
           </p>
         </div>
         <Button
           onClick={() => handleOpenDialog()}
-          className='bg-primary text-white'
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
         >
           <Plus className='w-4 h-4 mr-2' /> Tambah Driver
         </Button>
       </div>
 
-      <div className='bg-card border border-border rounded-xl shadow-sm overflow-hidden'>
-        <div className='p-4 border-b border-border bg-muted/20'>
-          <div className='relative w-full max-w-sm'>
-            <Search className='absolute left-3 top-2.5 h-4 w-4 text-muted-foreground' />
-            <Input
-              placeholder='Cari driver...'
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className='pl-9 bg-background'
-            />
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
           </div>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchDrivers}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
+          >
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
         </div>
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm text-left'>
-            <thead className='bg-muted/40 text-muted-foreground font-heading border-b border-border'>
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((h) => (
-                    <th key={h.id} className='px-6 py-4 font-semibold'>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className='hover:bg-muted/10'>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className='px-6 py-4'>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      )}
+
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
+        <div className='p-4 border-b border-border bg-muted/20'>
+          <SearchInput
+            value={globalFilter ?? ''}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder='Cari nama, NIK, atau nomor HP...'
+            className='w-full sm:max-w-sm'
+          />
         </div>
+
+        <DataTable
+          columns={columns}
+          data={data}
+          isLoading={isLoading}
+          emptyMessage='Tidak ada data driver yang ditemukan.'
+        />
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className='sm:max-w-[400px] bg-card'>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Driver' : 'Tambah Driver'}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
-            <div>
-              <Input {...form.register('name')} placeholder='Nama Lengkap' />
-              {form.formState.errors.name && (
-                <p className='text-xs text-destructive mt-1'>
-                  {form.formState.errors.name.message}
-                </p>
-              )}
-            </div>
-            <div>
-              <Input
-                {...form.register('nik')}
-                placeholder='NIK (16 Digit)'
-                maxLength={16}
-              />
-              {form.formState.errors.nik && (
-                <p className='text-xs text-destructive mt-1'>
-                  {form.formState.errors.nik.message}
-                </p>
-              )}
-            </div>
-            <div>
-              <Input
-                {...form.register('phone_number')}
-                placeholder='Nomor Handphone'
-              />
-              {form.formState.errors.phone_number && (
-                <p className='text-xs text-destructive mt-1'>
-                  {form.formState.errors.phone_number.message}
-                </p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                type='submit'
-                className='bg-primary text-white'
-                disabled={form.formState.isSubmitting}
-              >
-                Simpan
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={editingId ? 'Edit Data Driver' : 'Tambah Driver Baru'}
+        size='md'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsDialogOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='driver-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='driver-form'
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='space-y-5 py-2'
+        >
+          <Input
+            label='Nama Driver'
+            required
+            placeholder='Nama lengkap sesuai KTP'
+            error={form.formState.errors.name?.message}
+            {...form.register('name')}
+          />
+          <Input
+            label='NIK KTP (16 Digit)'
+            required
+            maxLength={16}
+            placeholder='327xxxxxxxxxxxxx'
+            error={form.formState.errors.nik?.message}
+            {...form.register('nik')}
+          />
+          <Input
+            label='Nomor Handphone'
+            required
+            placeholder='08xxxxxxxxxx'
+            error={form.formState.errors.phone_number?.message}
+            {...form.register('phone_number')}
+          />
+        </form>
+      </Modal>
+
+      <AlertDialog
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus data driver ini? Tindakan ini
+              tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

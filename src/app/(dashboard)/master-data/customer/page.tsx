@@ -1,90 +1,61 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getFilteredRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
-import {
-  Search,
   Plus,
-  Edit2,
-  Trash2,
   Building2,
-  MoreHorizontal,
+  RefreshCcw,
+  AlertCircle,
+  ArrowUpDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Customer, CustomerFormValues, customerSchema } from '@/types/customer';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { api } from '@/lib/api';
 
-// Dummy Data (Struktur menyesuaikan Backend + Computed Fields)
-const dummyData: Customer[] = [
-  {
-    id: '1',
-    company_name: 'PT. Industri Maju Abadi',
-    npwp: '01.234.567.8-901.000',
-    address: 'Jl. Raya Industri No.12, Bekasi',
-    phone_number: '021-88997766',
-    pic_name: 'Budi Santoso',
-    pic_phone_number: '081234567890',
-    status: 'Aktif',
-    saldo_deposit: 2500000,
-  },
-  {
-    id: '2',
-    company_name: 'PT. Tekno Pangan',
-    npwp: '02.345.678.9-012.000',
-    address: 'Kawasan Surya Cipta, Karawang',
-    phone_number: '0267-112233',
-    pic_name: 'Andi Wijaya',
-    pic_phone_number: '081987654321',
-    status: 'Aktif',
-    saldo_deposit: 15000000,
-  },
-  {
-    id: '3',
-    company_name: 'CV. Berkah Gas',
-    npwp: '03.456.789.0-123.000',
-    address: 'Jl. Soekarno Hatta, Bandung',
-    phone_number: '022-445566',
-    pic_name: 'Siti Aminah',
-    pic_phone_number: '081566778899',
-    status: 'Nonaktif',
-    saldo_deposit: 0,
-  },
-];
+// Reusable UI Components
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const columnHelper = createColumnHelper<Customer>();
 
 export default function CustomerPage() {
-  const [data, setData] = useState<Customer[]>(dummyData);
+  // --- STATES ---
+  const [data, setData] = useState<Customer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filter & Search States
   const [globalFilter, setGlobalFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Semua');
+
+  // Dialog States
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Delete States
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // --- FORM SETUP ---
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
@@ -97,6 +68,38 @@ export default function CustomerPage() {
     },
   });
 
+  // --- API CALLS ---
+  const fetchCustomers = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<any>('/v1/customers');
+      // Asumsi backend mereturn array di res.data atau res.data.rows
+      const fetchedData = Array.isArray(res.data)
+        ? res.data
+        : res.data?.rows || [];
+
+      // Mapping untuk menambahkan computed fields yang dibutuhkan UI jika belum ada di DTO
+      const mappedData: Customer[] = fetchedData.map((item: any) => ({
+        ...item,
+        status: item.status || 'Aktif',
+        saldo_deposit: item.saldo_deposit || 0,
+      }));
+
+      setData(mappedData);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data customer dari server.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [fetchCustomers]);
+
+  // --- HANDLERS ---
   const handleOpenDialog = (customer?: Customer) => {
     if (customer) {
       setEditingId(customer.id);
@@ -124,23 +127,54 @@ export default function CustomerPage() {
 
   const onSubmit = async (values: CustomerFormValues) => {
     try {
-      // Simulasi API POST/PUT
-      await new Promise((res) => setTimeout(res, 600));
-      toast.success(
-        `Customer berhasil ${editingId ? 'diperbarui' : 'ditambahkan'}`,
-      );
+      if (editingId) {
+        await api.put(`/v1/customers/${editingId}`, values);
+        toast.success('Data customer berhasil diperbarui.');
+      } else {
+        await api.post('/v1/customers', values);
+        toast.success('Customer baru berhasil ditambahkan.');
+      }
       setIsDialogOpen(false);
-      // Implementasi refresh fetch() nantinya diletakkan di sini
-    } catch (error) {
-      toast.error('Terjadi kesalahan sistem');
+      fetchCustomers();
+    } catch (err: any) {
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan data.');
     }
   };
 
-  // Definisi Kolom Tabel
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/v1/customers/${deletingId}`);
+      toast.success('Customer berhasil dihapus.');
+      fetchCustomers();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus data.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
+  };
+
+  // Filter logic (Client-side untuk computed status)
+  const filteredData = useMemo(() => {
+    if (statusFilter === 'Semua') return data;
+    return data.filter((item) => item.status === statusFilter);
+  }, [data, statusFilter]);
+
+  // --- TABLE COLUMNS ---
   const columns = useMemo(
     () => [
       columnHelper.accessor('company_name', {
-        header: 'Nama Perusahaan',
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Nama Perusahaan <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
           <div className='flex items-center gap-2'>
             <Building2 className='w-4 h-4 text-muted-foreground' />
@@ -151,14 +185,22 @@ export default function CustomerPage() {
         ),
       }),
       columnHelper.accessor('pic_name', {
-        header: 'PIC & Kontak',
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            PIC & Kontak <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
           <div className='flex flex-col'>
             <span className='text-sm font-medium text-foreground'>
-              {info.getValue()}
+              {info.getValue() || '-'}
             </span>
-            <span className='text-xs text-muted-foreground'>
-              {info.row.original.pic_phone_number}
+            <span className='text-xs text-muted-foreground font-mono'>
+              {info.row.original.pic_phone_number || '-'}
             </span>
           </div>
         ),
@@ -166,10 +208,10 @@ export default function CustomerPage() {
       columnHelper.accessor('saldo_deposit', {
         header: 'Saldo Deposit',
         cell: (info) => {
-          const value = info.getValue();
+          const value = info.getValue() || 0;
           return (
             <span
-              className={`font-mono font-medium ${value < 5000000 ? 'text-destructive' : 'text-emerald-500'}`}
+              className={`font-mono font-bold ${value < 5000000 ? 'text-destructive' : 'text-emerald-500'}`}
             >
               Rp {value.toLocaleString('id-ID')}
             </span>
@@ -193,50 +235,23 @@ export default function CustomerPage() {
       }),
       columnHelper.display({
         id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon' className='h-8 w-8'>
-                <MoreHorizontal className='h-4 w-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align='end'
-              className='w-40 bg-card border-border'
-            >
-              <DropdownMenuItem
-                onClick={() => handleOpenDialog(info.row.original)}
-                className='cursor-pointer'
-              >
-                <Edit2 className='mr-2 h-4 w-4' /> Edit Data
-              </DropdownMenuItem>
-              <DropdownMenuItem className='cursor-pointer text-destructive focus:text-destructive'>
-                <Trash2 className='mr-2 h-4 w-4' /> Nonaktifkan
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TableActions
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
+          />
         ),
       }),
     ],
     [],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 10 } },
-  });
-
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className='text-2xl font-heading font-bold text-foreground'>
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
             Master Customer
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
@@ -245,210 +260,177 @@ export default function CustomerPage() {
         </div>
         <Button
           onClick={() => handleOpenDialog()}
-          className='bg-primary hover:bg-primary/90 text-white'
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
         >
           <Plus className='w-4 h-4 mr-2' /> Tambah Customer
         </Button>
       </div>
 
-      <div className='bg-card border border-border rounded-xl shadow-sm overflow-hidden'>
+      {/* ERROR STATE */}
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
+          </div>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchCustomers}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
+          >
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
+        </div>
+      )}
+
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
         {/* Table Toolbar */}
-        <div className='p-4 border-b border-border flex items-center justify-between gap-4 bg-muted/20'>
-          <div className='relative w-full max-w-sm'>
-            <Search className='absolute left-3 top-2.5 h-4 w-4 text-muted-foreground' />
-            <Input
-              placeholder='Cari perusahaan atau PIC...'
-              value={globalFilter ?? ''}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className='pl-9 bg-background border-border'
-            />
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/20'>
+          <SearchInput
+            value={globalFilter ?? ''}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder='Cari nama, alamat, atau PIC...'
+            className='w-full sm:max-w-sm'
+          />
+
+          <div className='flex items-center gap-2 w-full sm:w-auto'>
+            <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider'>
+              Status:
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className='flex h-9 w-full sm:w-32 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-primary'
+            >
+              <option value='Semua'>Semua</option>
+              <option value='Aktif'>Aktif</option>
+              <option value='Nonaktif'>Nonaktif</option>
+            </select>
           </div>
         </div>
 
-        {/* Data Table */}
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm text-left'>
-            <thead className='bg-muted/40 text-muted-foreground font-heading'>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className='px-6 py-4 font-semibold border-b border-border'
-                    >
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext(),
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {table.getRowModel().rows.length > 0 ? (
-                table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className='hover:bg-muted/10 transition-colors'
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className='px-6 py-4'>
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={columns.length}
-                    className='px-6 py-12 text-center text-muted-foreground'
-                  >
-                    Tidak ada data customer yang ditemukan.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className='p-4 border-t border-border flex items-center justify-between bg-muted/20'>
-          <span className='text-sm text-muted-foreground'>
-            Halaman {table.getState().pagination.pageIndex + 1} dari{' '}
-            {table.getPageCount()}
-          </span>
-          <div className='space-x-2'>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className='border-border'
-            >
-              Sebelumnnya
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className='border-border'
-            >
-              Selanjutnya
-            </Button>
-          </div>
-        </div>
+        {/* Reusable Data Table */}
+        <DataTable
+          columns={columns}
+          data={filteredData}
+          isLoading={isLoading}
+          emptyMessage='Tidak ada data customer yang ditemukan.'
+        />
       </div>
 
-      {/* Form Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className='sm:max-w-[600px] bg-card border-border'>
-          <DialogHeader>
-            <DialogTitle className='font-heading text-xl'>
-              {editingId ? 'Edit Data Customer' : 'Tambah Customer Baru'}
-            </DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className='space-y-4 mt-4'
-          >
-            <div className='grid grid-cols-2 gap-4'>
-              <div className='space-y-2 col-span-2'>
-                <label className='text-sm font-medium'>
-                  Nama Perusahaan <span className='text-destructive'>*</span>
-                </label>
-                <Input
-                  {...form.register('company_name')}
-                  placeholder='PT. Arto Ageng Abadi'
-                  className='border-border'
-                />
-                {form.formState.errors.company_name && (
-                  <p className='text-xs text-destructive'>
-                    {form.formState.errors.company_name.message}
-                  </p>
-                )}
-              </div>
-              <div className='space-y-2'>
-                <label className='text-sm font-medium'>NPWP</label>
-                <Input
-                  {...form.register('npwp')}
-                  placeholder='00.000.000.0-000.000'
-                  className='border-border'
-                />
-              </div>
-              <div className='space-y-2'>
-                <label className='text-sm font-medium'>
-                  No. Telepon Kantor
-                </label>
-                <Input
-                  {...form.register('phone_number')}
-                  placeholder='021-XXXXXXX'
-                  className='border-border'
-                />
-              </div>
-              <div className='space-y-2 col-span-2'>
-                <label className='text-sm font-medium'>Alamat Lengkap</label>
-                <Input
-                  {...form.register('address')}
-                  placeholder='Jl. Raya...'
-                  className='border-border'
-                />
-              </div>
-              <div className='space-y-2'>
-                <label className='text-sm font-medium'>
-                  Nama PIC <span className='text-destructive'>*</span>
-                </label>
-                <Input
-                  {...form.register('pic_name')}
-                  placeholder='Nama Penanggung Jawab'
-                  className='border-border'
-                />
-                {form.formState.errors.pic_name && (
-                  <p className='text-xs text-destructive'>
-                    {form.formState.errors.pic_name.message}
-                  </p>
-                )}
-              </div>
-              <div className='space-y-2'>
-                <label className='text-sm font-medium'>
-                  No. HP PIC <span className='text-destructive'>*</span>
-                </label>
-                <Input
-                  {...form.register('pic_phone_number')}
-                  placeholder='08XXXXXXXXXX'
-                  className='border-border'
-                />
-                {form.formState.errors.pic_phone_number && (
-                  <p className='text-xs text-destructive'>
-                    {form.formState.errors.pic_phone_number.message}
-                  </p>
-                )}
-              </div>
+      {/* REUSABLE MODAL FORM */}
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={editingId ? 'Edit Data Customer' : 'Tambah Customer Baru'}
+        size='lg'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsDialogOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='customer-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='customer-form'
+          onSubmit={form.handleSubmit(onSubmit)}
+          className='grid grid-cols-1 md:grid-cols-2 gap-5 py-2'
+        >
+          <div className='col-span-1 md:col-span-2'>
+            <Input
+              label='Nama Perusahaan'
+              required
+              placeholder='PT. Arto Ageng Abadi'
+              error={form.formState.errors.company_name?.message}
+              {...form.register('company_name')}
+            />
+          </div>
+          <Input
+            label='NPWP'
+            placeholder='00.000.000.0-000.000'
+            error={form.formState.errors.npwp?.message}
+            {...form.register('npwp')}
+          />
+          <Input
+            label='No. Telepon Kantor'
+            placeholder='021-XXXXXXX'
+            error={form.formState.errors.phone_number?.message}
+            {...form.register('phone_number')}
+          />
+          <div className='col-span-1 md:col-span-2'>
+            <Input
+              label='Alamat Lengkap'
+              placeholder='Jl. Raya Industri...'
+              error={form.formState.errors.address?.message}
+              {...form.register('address')}
+            />
+          </div>
+          <div className='border-t border-border/50 pt-4 mt-2 col-span-1 md:col-span-2'>
+            <h4 className='text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4'>
+              Informasi Penanggung Jawab (PIC)
+            </h4>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
+              <Input
+                label='Nama PIC'
+                required
+                placeholder='Budi Santoso'
+                error={form.formState.errors.pic_name?.message}
+                {...form.register('pic_name')}
+              />
+              <Input
+                label='No. HP PIC'
+                required
+                placeholder='08XXXXXXXXXX'
+                error={form.formState.errors.pic_phone_number?.message}
+                {...form.register('pic_phone_number')}
+              />
             </div>
-            <DialogFooter className='mt-6 border-t border-border pt-4'>
-              <Button
-                type='button'
-                variant='ghost'
-                onClick={() => setIsDialogOpen(false)}
-              >
-                Batal
-              </Button>
-              <Button
-                type='submit'
-                className='bg-primary hover:bg-primary/90 text-white'
-                disabled={form.formState.isSubmitting}
-              >
-                {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </form>
+      </Modal>
+
+      {/* DELETE CONFIRMATION ALERT DIALOG */}
+      <AlertDialog
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus data customer ini? Tindakan ini
+              tidak dapat dibatalkan dan mungkin mempengaruhi data transaksi
+              yang terkait.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
