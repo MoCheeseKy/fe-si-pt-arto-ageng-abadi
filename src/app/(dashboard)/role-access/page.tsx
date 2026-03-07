@@ -1,390 +1,735 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { createColumnHelper } from '@tanstack/react-table';
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
-import {
-  Search,
   Plus,
+  ShieldAlert,
+  AlertCircle,
+  RefreshCcw,
+  ArrowUpDown,
   Shield,
-  Edit2,
-  Trash2,
-  MoreHorizontal,
-  CheckSquare,
+  LayoutGrid,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
 
-import { Role, RoleFormValues, roleSchema } from '@/types/role';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/form/Input';
+import { SearchInput } from '@/components/form/SearchInput';
+import { Select } from '@/components/form/Select';
+import { DataTable } from '@/components/_shared/DataTable';
+import { Modal } from '@/components/_shared/Modal';
+import { TableActions } from '@/components/_shared/TableActions';
+import { Tabs } from '@/components/_shared/Tabs';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
-const dummyRoles: Role[] = [
-  {
-    id: '1',
-    name: 'Super Admin',
-    description: 'Akses penuh ke seluruh sistem',
-    total_users: 1,
-  },
-  {
-    id: '2',
-    name: 'Finance',
-    description: 'Akses modul keuangan dan accounting',
-    total_users: 2,
-  },
-  {
-    id: '3',
-    name: 'Operator',
-    description: 'Akses modul operasional lapangan',
-    total_users: 4,
-  },
-];
+const roleSchema = z.object({
+  name: z.string().min(1, 'Nama role wajib diisi'),
+});
 
-// Mock data: Daftar modul/navigasi yang ada di sistem
-const availableModules = [
-  { id: 'MOD-01', category: 'Master Data', name: 'Master Customer' },
-  { id: 'MOD-02', category: 'Master Data', name: 'Master Supplier' },
-  { id: 'MOD-03', category: 'Master Data', name: 'Master Driver' },
-  { id: 'MOD-04', category: 'Operasional', name: 'Pengisian Gas (Pembelian)' },
-  { id: 'MOD-05', category: 'Operasional', name: 'Pemakaian Gas (Distribusi)' },
-  { id: 'MOD-06', category: 'Operasional', name: 'Kontrak & Penawaran' },
-  { id: 'MOD-07', category: 'Keuangan', name: 'Manajemen Invoice' },
-  { id: 'MOD-08', category: 'Keuangan', name: 'Wallet & Deposit' },
-  { id: 'MOD-09', category: 'Keuangan', name: 'Pengeluaran & Petty Cash' },
-  { id: 'MOD-10', category: 'Accounting', name: 'Buku Besar & Jurnal' },
-  { id: 'MOD-11', category: 'Sistem', name: 'User & Role Management' },
-];
+const navigationSchema = z.object({
+  name: z.string().min(1, 'Nama menu/navigasi wajib diisi'),
+  path: z.string().min(1, 'Path URL wajib diisi (contoh: /dashboard)'),
+});
 
-const columnHelper = createColumnHelper<Role>();
+const roleNavSchema = z.object({
+  role_id: z.string().min(1, 'Role wajib dipilih'),
+  navigation_id: z.string().min(1, 'Navigasi wajib dipilih'),
+});
 
+type RoleFormValues = z.infer<typeof roleSchema>;
+type NavFormValues = z.infer<typeof navigationSchema>;
+type RoleNavFormValues = z.infer<typeof roleNavSchema>;
+
+export interface RoleRow extends RoleFormValues {
+  id: string;
+}
+export interface NavRow extends NavFormValues {
+  id: string;
+}
+export interface RoleNavRow extends RoleNavFormValues {
+  id?: string;
+  role_id: string;
+  navigation_id: string;
+  role_name?: string;
+  navigation_name?: string;
+  navigation_path?: string;
+}
+
+const roleHelper = createColumnHelper<RoleRow>();
+const navHelper = createColumnHelper<NavRow>();
+const roleNavHelper = createColumnHelper<RoleNavRow>();
+
+/**
+ * Halaman manajemen Role Access dan Navigasi.
+ * Mengelola data Role, Menu Navigasi, dan pemetaan Hak Akses (Role has Navigation).
+ *
+ * @returns {JSX.Element} Komponen antarmuka Role Access
+ */
 export default function RoleAccessPage() {
-  const [data, setData] = useState<Role[]>(dummyRoles);
-  const [globalFilter, setGlobalFilter] = useState('');
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [roles, setRoles] = useState<RoleRow[]>([]);
+  const [navs, setNavs] = useState<NavRow[]>([]);
+  const [roleNavs, setRoleNavs] = useState<RoleNavRow[]>([]);
 
-  const form = useForm<RoleFormValues>({
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [roleSearch, setRoleSearch] = useState('');
+  const [navSearch, setNavSearch] = useState('');
+  const [roleNavSearch, setRoleNavSearch] = useState('');
+
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [roleEditId, setRoleEditId] = useState<string | null>(null);
+
+  const [isNavModalOpen, setIsNavModalOpen] = useState(false);
+  const [navEditId, setNavEditId] = useState<string | null>(null);
+
+  const [isRoleNavModalOpen, setIsRoleNavModalOpen] = useState(false);
+
+  const [deletingRecord, setDeletingRecord] = useState<{
+    id: string;
+    type: 'role' | 'nav' | 'rolenav';
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const roleForm = useForm<RoleFormValues>({
     resolver: zodResolver(roleSchema),
-    defaultValues: { name: '', description: '', permissions: [] },
+    defaultValues: { name: '' },
+  });
+  const navForm = useForm<NavFormValues>({
+    resolver: zodResolver(navigationSchema),
+    defaultValues: { name: '', path: '' },
+  });
+  const roleNavForm = useForm<RoleNavFormValues>({
+    resolver: zodResolver(roleNavSchema),
+    defaultValues: { role_id: '', navigation_id: '' },
   });
 
-  const watchPermissions =
-    useWatch({ control: form.control, name: 'permissions' }) || [];
+  /**
+   * Mengambil data Role, Navigasi, dan relasinya secara paralel dari backend.
+   *
+   * @returns {Promise<void>}
+   */
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [roleRes, navRes, roleNavRes] = await Promise.all([
+        api.get<any>('/v1/role'),
+        api.get<any>('/v1/navigations'),
+        api.get<any>('/v1/role-has-navigations'),
+      ]);
 
-  const handleOpenDialog = (role?: Role) => {
-    if (role) {
-      setEditingId(role.id);
-      // Simulasi fetch permissions yang sudah ada
-      form.reset({
-        name: role.name,
-        description: role.description,
-        permissions:
-          role.name === 'Finance'
-            ? ['MOD-07', 'MOD-08', 'MOD-09', 'MOD-10']
-            : ['MOD-01'],
-      });
-    } else {
-      setEditingId(null);
-      form.reset({ name: '', description: '', permissions: [] });
+      const roleList = Array.isArray(roleRes.data)
+        ? roleRes.data
+        : roleRes.data?.rows || [];
+      const navList = Array.isArray(navRes.data)
+        ? navRes.data
+        : navRes.data?.rows || [];
+      const roleNavList = Array.isArray(roleNavRes.data)
+        ? roleNavRes.data
+        : roleNavRes.data?.rows || [];
+
+      setRoles(roleList);
+      setNavs(navList);
+
+      const mappedRoleNavs = roleNavList.map((rn: any) => ({
+        ...rn,
+        role_name:
+          roleList.find((r: any) => r.id === rn.role_id)?.name ||
+          'Unknown Role',
+        navigation_name:
+          navList.find((n: any) => n.id === rn.navigation_id)?.name ||
+          'Unknown Navigasi',
+        navigation_path:
+          navList.find((n: any) => n.id === rn.navigation_id)?.path || '-',
+      }));
+
+      setRoleNavs(mappedRoleNavs);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data pengaturan akses.');
+      toast.error('Gagal memuat data');
+    } finally {
+      setIsLoading(false);
     }
-    setIsDialogOpen(true);
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const onRoleSubmit = async (values: RoleFormValues) => {
+    try {
+      if (roleEditId) {
+        await api.put(`/v1/role/${roleEditId}`, values);
+        toast.success('Role berhasil diperbarui.');
+      } else {
+        await api.post('/v1/role', values);
+        toast.success('Role baru berhasil ditambahkan.');
+      }
+      setIsRoleModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menyimpan role.');
+    }
   };
 
-  const handleTogglePermission = (modId: string, checked: boolean) => {
-    if (checked)
-      form.setValue('permissions', [...watchPermissions, modId], {
-        shouldValidate: true,
-      });
-    else
-      form.setValue(
-        'permissions',
-        watchPermissions.filter((id) => id !== modId),
-        { shouldValidate: true },
+  const onNavSubmit = async (values: NavFormValues) => {
+    try {
+      if (navEditId) {
+        await api.put(`/v1/navigations/${navEditId}`, values);
+        toast.success('Menu navigasi berhasil diperbarui.');
+      } else {
+        await api.post('/v1/navigations', values);
+        toast.success('Menu navigasi baru berhasil ditambahkan.');
+      }
+      setIsNavModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menyimpan navigasi.');
+    }
+  };
+
+  const onRoleNavSubmit = async (values: RoleNavFormValues) => {
+    try {
+      await api.post('/v1/role-has-navigations', values);
+      toast.success('Hak akses menu berhasil diberikan pada role.');
+      setIsRoleNavModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(
+        err.message || 'Gagal memberikan hak akses. Pastikan relasi belum ada.',
       );
+    }
   };
 
-  const handleSelectAll = () => {
-    form.setValue(
-      'permissions',
-      availableModules.map((m) => m.id),
-      { shouldValidate: true },
-    );
+  /**
+   * Menghapus rekaman berdasarkan tipe tab yang sedang aktif atau dipilih.
+   * Untuk entitas pivot (RoleHasNav), mungkin membutuhkan composite key atau ID.
+   */
+  const handleDelete = async () => {
+    if (!deletingRecord) return;
+    setIsDeleting(true);
+    let endpoint = '';
+
+    if (deletingRecord.type === 'role')
+      endpoint = `/v1/role/${deletingRecord.id}`;
+    else if (deletingRecord.type === 'nav')
+      endpoint = `/v1/navigations/${deletingRecord.id}`;
+    else endpoint = `/v1/role-has-navigations/${deletingRecord.id}`;
+    // Catatan: Jika pivot table (role-has-navigations) di backend menggunakan Composite Key (role_id & navigation_id)
+    // untuk DELETE, Anda harus menyesuaikan endpoint ini sesuai dokumentasi API.
+
+    try {
+      await api.delete(endpoint);
+      toast.success('Data berhasil dihapus.');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Gagal menghapus data.');
+    } finally {
+      setIsDeleting(false);
+      setDeletingRecord(null);
+    }
   };
 
-  const handleDeselectAll = () => {
-    form.setValue('permissions', [], { shouldValidate: true });
-  };
+  // --- FILTER & DROPDOWN OPTIONS ---
+  const filteredRoles = useMemo(
+    () =>
+      roles.filter((r) =>
+        r.name.toLowerCase().includes(roleSearch.toLowerCase()),
+      ),
+    [roles, roleSearch],
+  );
+  const filteredNavs = useMemo(
+    () =>
+      navs.filter(
+        (n) =>
+          n.name.toLowerCase().includes(navSearch.toLowerCase()) ||
+          n.path.toLowerCase().includes(navSearch.toLowerCase()),
+      ),
+    [navs, navSearch],
+  );
+  const filteredRoleNavs = useMemo(
+    () =>
+      roleNavs.filter(
+        (rn) =>
+          (rn.role_name || '')
+            .toLowerCase()
+            .includes(roleNavSearch.toLowerCase()) ||
+          (rn.navigation_name || '')
+            .toLowerCase()
+            .includes(roleNavSearch.toLowerCase()),
+      ),
+    [roleNavs, roleNavSearch],
+  );
 
-  const onSubmit = async (values: RoleFormValues) => {
-    await new Promise((res) => setTimeout(res, 500));
-    toast.success(
-      `Role & Hak Akses berhasil ${editingId ? 'diperbarui' : 'ditambahkan'}.`,
-    );
-    setIsDialogOpen(false);
-  };
+  const roleOptions = useMemo(
+    () => roles.map((r) => ({ label: r.name, value: r.id })),
+    [roles],
+  );
+  const navOptions = useMemo(
+    () => navs.map((n) => ({ label: `${n.name} (${n.path})`, value: n.id })),
+    [navs],
+  );
 
-  const columns = useMemo(
+  // --- COLUMNS ---
+  const roleCols = useMemo(
     () => [
-      columnHelper.accessor('name', {
-        header: 'Nama Jabatan (Role)',
+      roleHelper.accessor('name', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Nama Role <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
         cell: (info) => (
-          <span className='font-bold text-primary'>{info.getValue()}</span>
+          <Badge
+            variant='outline'
+            className='bg-background flex w-fit items-center gap-1.5 py-1'
+          >
+            <Shield className='w-3.5 h-3.5 text-primary' />{' '}
+            <span className='font-semibold text-sm'>{info.getValue()}</span>
+          </Badge>
         ),
       }),
-      columnHelper.accessor('description', {
-        header: 'Deskripsi',
-        cell: (info) => (
-          <span className='text-muted-foreground'>
-            {info.getValue() || '-'}
-          </span>
-        ),
-      }),
-      columnHelper.accessor('total_users', {
-        header: 'Total Pengguna',
-        cell: (info) => (
-          <Badge variant='secondary'>{info.getValue()} User</Badge>
-        ),
-      }),
-      columnHelper.display({
+      roleHelper.display({
         id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon'>
-                <MoreHorizontal className='h-4 w-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-48'>
-              <DropdownMenuItem
-                onClick={() => handleOpenDialog(info.row.original)}
-              >
-                <Edit2 className='mr-2 h-4 w-4' /> Edit Hak Akses
-              </DropdownMenuItem>
-              <DropdownMenuItem className='text-destructive'>
-                <Trash2 className='mr-2 h-4 w-4' /> Hapus Role
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TableActions
+            onEdit={() => {
+              setRoleEditId(info.row.original.id);
+              roleForm.reset({ name: info.row.original.name });
+              setIsRoleModalOpen(true);
+            }}
+            onDelete={() =>
+              setDeletingRecord({ id: info.row.original.id, type: 'role' })
+            }
+          />
         ),
       }),
     ],
-    [watchPermissions],
+    [roleForm],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-  });
+  const navCols = useMemo(
+    () => [
+      navHelper.accessor('name', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Label Menu <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='font-medium text-foreground'>{info.getValue()}</span>
+        ),
+      }),
+      navHelper.accessor('path', {
+        header: 'Path URL',
+        cell: (info) => (
+          <span className='font-mono text-muted-foreground'>
+            {info.getValue()}
+          </span>
+        ),
+      }),
+      navHelper.display({
+        id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
+        cell: (info) => (
+          <TableActions
+            onEdit={() => {
+              setNavEditId(info.row.original.id);
+              navForm.reset({
+                name: info.row.original.name,
+                path: info.row.original.path,
+              });
+              setIsNavModalOpen(true);
+            }}
+            onDelete={() =>
+              setDeletingRecord({ id: info.row.original.id, type: 'nav' })
+            }
+          />
+        ),
+      }),
+    ],
+    [navForm],
+  );
 
-  // Group modules by category for UI grouping
-  const groupedModules = availableModules.reduce(
-    (acc, mod) => {
-      if (!acc[mod.category]) acc[mod.category] = [];
-      acc[mod.category].push(mod);
-      return acc;
+  const roleNavCols = useMemo(
+    () => [
+      roleNavHelper.accessor('role_name', {
+        header: ({ column }) => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Tingkat Role <ArrowUpDown className='ml-2 h-3 w-3' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='font-semibold text-primary'>{info.getValue()}</span>
+        ),
+      }),
+      roleNavHelper.accessor('navigation_name', {
+        header: 'Menu yang Bisa Diakses',
+        cell: (info) => (
+          <div className='flex flex-col'>
+            <span className='font-medium text-foreground'>
+              {info.getValue()}
+            </span>
+            <span className='text-xs text-muted-foreground font-mono'>
+              {info.row.original.navigation_path}
+            </span>
+          </div>
+        ),
+      }),
+      roleNavHelper.display({
+        id: 'actions',
+        header: () => <div className='text-right'>Aksi</div>,
+        cell: (info) => (
+          <TableActions
+            onDelete={
+              info.row.original.id
+                ? () =>
+                    setDeletingRecord({
+                      id: info.row.original.id!,
+                      type: 'rolenav',
+                    })
+                : undefined
+            }
+          />
+        ),
+      }),
+    ],
+    [],
+  );
+
+  const tabsContent = [
+    {
+      label: 'Master Role',
+      value: 'role',
+      content: (
+        <div className='space-y-4'>
+          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
+            <SearchInput
+              value={roleSearch}
+              onChange={(e) => setRoleSearch(e.target.value)}
+              placeholder='Cari nama role...'
+            />
+            <Button
+              onClick={() => {
+                setRoleEditId(null);
+                roleForm.reset({ name: '' });
+                setIsRoleModalOpen(true);
+              }}
+              className='bg-primary hover:bg-primary/90 text-white'
+            >
+              <Plus className='w-4 h-4 mr-2' /> Tambah Role
+            </Button>
+          </div>
+          <DataTable
+            columns={roleCols}
+            data={filteredRoles}
+            isLoading={isLoading}
+            emptyMessage='Belum ada data Role.'
+          />
+        </div>
+      ),
     },
-    {} as Record<string, typeof availableModules>,
-  );
+    {
+      label: 'Menu Navigasi',
+      value: 'nav',
+      content: (
+        <div className='space-y-4'>
+          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
+            <SearchInput
+              value={navSearch}
+              onChange={(e) => setNavSearch(e.target.value)}
+              placeholder='Cari nama atau path menu...'
+            />
+            <Button
+              onClick={() => {
+                setNavEditId(null);
+                navForm.reset({ name: '', path: '' });
+                setIsNavModalOpen(true);
+              }}
+              className='bg-primary hover:bg-primary/90 text-white'
+            >
+              <Plus className='w-4 h-4 mr-2' /> Tambah Menu
+            </Button>
+          </div>
+          <DataTable
+            columns={navCols}
+            data={filteredNavs}
+            isLoading={isLoading}
+            emptyMessage='Belum ada data Navigasi.'
+          />
+        </div>
+      ),
+    },
+    {
+      label: 'Pemetaan Hak Akses',
+      value: 'mapping',
+      content: (
+        <div className='space-y-4'>
+          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
+            <SearchInput
+              value={roleNavSearch}
+              onChange={(e) => setRoleNavSearch(e.target.value)}
+              placeholder='Cari role atau menu...'
+            />
+            <Button
+              onClick={() => {
+                roleNavForm.reset({ role_id: '', navigation_id: '' });
+                setIsRoleNavModalOpen(true);
+              }}
+              className='bg-primary hover:bg-primary/90 text-white'
+            >
+              <LinkIcon className='w-4 h-4 mr-2' /> Berikan Akses Menu
+            </Button>
+          </div>
+          <DataTable
+            columns={roleNavCols}
+            data={filteredRoleNavs}
+            isLoading={isLoading}
+            emptyMessage='Belum ada pemetaan hak akses.'
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
-      <div className='flex justify-between items-center'>
-        <div>
-          <h2 className='text-2xl font-heading font-bold flex items-center gap-2'>
-            <Shield className='w-6 h-6 text-primary' /> Role Access
-          </h2>
-          <p className='text-sm text-muted-foreground mt-1'>
-            Definisikan jabatan dan atur modul apa saja yang boleh mereka akses.
-          </p>
-        </div>
-        <Button
-          onClick={() => handleOpenDialog()}
-          className='bg-primary text-white'
-        >
-          <Plus className='w-4 h-4 mr-2' /> Tambah Role
-        </Button>
+      <div className='flex flex-col gap-1'>
+        <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
+          <ShieldAlert className='w-6 h-6 text-primary' /> Pengaturan Hak Akses
+        </h2>
+        <p className='text-sm text-muted-foreground'>
+          Konfigurasi Role pengguna dan pemetaan (mapping) menu navigasi yang
+          diperbolehkan.
+        </p>
       </div>
 
-      <div className='bg-card border border-border rounded-xl shadow-sm overflow-hidden'>
-        <div className='p-4 border-b border-border bg-muted/20'>
-          <Input
-            placeholder='Cari nama role...'
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className='max-w-sm bg-background'
-          />
-        </div>
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm text-left'>
-            <thead className='bg-muted/40 text-muted-foreground font-heading'>
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((h) => (
-                    <th key={h.id} className='px-6 py-4 font-semibold border-b'>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className='divide-y divide-border'>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className='hover:bg-muted/10'>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className='px-6 py-4'>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className='max-w-2xl bg-card max-h-[90vh] flex flex-col p-0'>
-          <div className='p-6 pb-4 border-b border-border'>
-            <DialogTitle className='text-xl font-heading'>
-              {editingId ? 'Edit Role & Hak Akses' : 'Buat Role Baru'}
-            </DialogTitle>
+      {error && !isLoading && (
+        <div className='bg-destructive/10 border border-destructive/20 p-4 rounded-xl flex items-center justify-between shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            <p className='text-sm font-medium text-destructive'>{error}</p>
           </div>
-
-          <form
-            id='role-form'
-            onSubmit={form.handleSubmit(onSubmit)}
-            className='flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6'
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={fetchData}
+            className='border-destructive/30 text-destructive hover:bg-destructive/10'
           >
-            <div className='grid grid-cols-2 gap-4'>
-              <div className='space-y-1 col-span-2 sm:col-span-1'>
-                <label className='text-xs font-bold'>Nama Jabatan (Role)</label>
-                <Input
-                  {...form.register('name')}
-                  placeholder='Contoh: Admin Gudang'
-                />
-              </div>
-              <div className='space-y-1 col-span-2 sm:col-span-1'>
-                <label className='text-xs'>Deskripsi (Opsional)</label>
-                <Input
-                  {...form.register('description')}
-                  placeholder='Tugas operasional...'
-                />
-              </div>
-            </div>
+            <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
+          </Button>
+        </div>
+      )}
 
-            <div className='space-y-3 pt-2'>
-              <div className='flex justify-between items-end border-b border-border pb-2'>
-                <div>
-                  <h3 className='text-sm font-bold text-primary flex items-center gap-2'>
-                    <CheckSquare className='w-4 h-4' /> Pengaturan Hak Akses
-                    (Modul)
-                  </h3>
-                  <p className='text-xs text-muted-foreground mt-1'>
-                    Centang modul yang boleh dilihat & dikelola oleh role ini.
-                  </p>
-                </div>
-                <div className='space-x-2'>
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={handleSelectAll}
-                    className='h-7 text-[10px]'
-                  >
-                    Pilih Semua
-                  </Button>
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={handleDeselectAll}
-                    className='h-7 text-[10px]'
-                  >
-                    Hapus Semua
-                  </Button>
-                </div>
-              </div>
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden p-2'>
+        <Tabs tabs={tabsContent} defaultValue='role' />
+      </div>
 
-              {form.formState.errors.permissions && (
-                <p className='text-xs text-destructive bg-destructive/10 p-2 rounded'>
-                  {form.formState.errors.permissions.message}
-                </p>
-              )}
-
-              <div className='grid grid-cols-1 md:grid-cols-2 gap-6 pt-2'>
-                {Object.entries(groupedModules).map(([category, modules]) => (
-                  <div key={category} className='space-y-2'>
-                    <h4 className='text-xs font-bold uppercase tracking-wider text-muted-foreground bg-muted/30 p-1.5 rounded'>
-                      {category}
-                    </h4>
-                    <div className='space-y-2 pl-2'>
-                      {modules.map((mod) => (
-                        <div
-                          key={mod.id}
-                          className='flex items-center space-x-3'
-                        >
-                          <input
-                            type='checkbox'
-                            id={`mod-${mod.id}`}
-                            className='w-4 h-4 text-primary rounded border-border focus:ring-primary bg-background'
-                            checked={watchPermissions.includes(mod.id)}
-                            onChange={(e) =>
-                              handleTogglePermission(mod.id, e.target.checked)
-                            }
-                          />
-                          <label
-                            htmlFor={`mod-${mod.id}`}
-                            className='text-sm font-medium cursor-pointer text-foreground'
-                          >
-                            {mod.name}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </form>
-
-          <div className='p-4 border-t border-border bg-muted/10'>
+      {/* MODAL ROLE */}
+      <Modal
+        isOpen={isRoleModalOpen}
+        onClose={() => setIsRoleModalOpen(false)}
+        title={roleEditId ? 'Edit Role' : 'Tambah Role Baru'}
+        size='sm'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsRoleModalOpen(false)}
+            >
+              Batal
+            </Button>
             <Button
               type='submit'
               form='role-form'
-              className='w-full bg-primary text-white'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={roleForm.formState.isSubmitting}
             >
-              Simpan Role & Akses
+              {roleForm.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Role'}
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        }
+      >
+        <form
+          id='role-form'
+          onSubmit={roleForm.handleSubmit(onRoleSubmit)}
+          className='space-y-4 py-2'
+        >
+          <Input
+            label='Nama Hak Akses (Role)'
+            placeholder='Contoh: Super Admin, Finance...'
+            error={roleForm.formState.errors.name?.message}
+            {...roleForm.register('name')}
+          />
+        </form>
+      </Modal>
+
+      {/* MODAL NAVIGASI */}
+      <Modal
+        isOpen={isNavModalOpen}
+        onClose={() => setIsNavModalOpen(false)}
+        title={navEditId ? 'Edit Navigasi Menu' : 'Tambah Menu Navigasi'}
+        size='md'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsNavModalOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='nav-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={navForm.formState.isSubmitting}
+            >
+              {navForm.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Menu'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='nav-form'
+          onSubmit={navForm.handleSubmit(onNavSubmit)}
+          className='space-y-5 py-2'
+        >
+          <Input
+            label='Label Menu'
+            placeholder='Contoh: Master Data Customer'
+            error={navForm.formState.errors.name?.message}
+            {...navForm.register('name')}
+          />
+          <Input
+            label='Path (URL Route)'
+            placeholder='Contoh: /master-data/customer'
+            error={navForm.formState.errors.path?.message}
+            {...navForm.register('path')}
+          />
+        </form>
+      </Modal>
+
+      {/* MODAL MAPPING ROLE HAS NAVIGATIONS */}
+      <Modal
+        isOpen={isRoleNavModalOpen}
+        onClose={() => setIsRoleNavModalOpen(false)}
+        title='Berikan Akses Menu ke Role'
+        size='md'
+        footer={
+          <div className='flex justify-end gap-3 w-full'>
+            <Button
+              type='button'
+              variant='ghost'
+              onClick={() => setIsRoleNavModalOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type='submit'
+              form='rolenav-form'
+              className='bg-primary hover:bg-primary/90 text-white'
+              disabled={roleNavForm.formState.isSubmitting}
+            >
+              {roleNavForm.formState.isSubmitting
+                ? 'Menyimpan...'
+                : 'Simpan Akses'}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id='rolenav-form'
+          onSubmit={roleNavForm.handleSubmit(onRoleNavSubmit)}
+          className='space-y-5 py-2'
+        >
+          <div className='bg-primary/5 p-4 rounded-xl border border-primary/20 mb-4'>
+            <p className='text-xs text-muted-foreground leading-snug'>
+              Pilih <strong className='text-foreground'>Role</strong> dan
+              pasangkan dengan{' '}
+              <strong className='text-foreground'>Menu Navigasi</strong> yang
+              diizinkan untuk diakses. Setelah disimpan, pengguna dengan role
+              ini akan dapat melihat menu tersebut.
+            </p>
+          </div>
+          <Select
+            label='Pilih Role Pengguna'
+            required
+            options={roleOptions}
+            value={roleNavForm.watch('role_id')}
+            onChange={(val) => roleNavForm.setValue('role_id', val)}
+            error={roleNavForm.formState.errors.role_id?.message}
+          />
+          <Select
+            label='Pilih Menu Navigasi (URL)'
+            required
+            options={navOptions}
+            value={roleNavForm.watch('navigation_id')}
+            onChange={(val) => roleNavForm.setValue('navigation_id', val)}
+            error={roleNavForm.formState.errors.navigation_id?.message}
+          />
+        </form>
+      </Modal>
+
+      {/* DELETE CONFIRMATION */}
+      <AlertDialog
+        open={!!deletingRecord}
+        onOpenChange={(open) => !open && setDeletingRecord(null)}
+      >
+        <AlertDialogContent className='bg-card border-border'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='text-destructive flex items-center gap-2'>
+              <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-muted-foreground'>
+              Apakah Anda yakin ingin menghapus data ini? Tindakan ini dapat
+              memutus hak akses pengguna yang sedang aktif dan tidak dapat
+              dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className='bg-destructive hover:bg-destructive/90 text-white'
+            >
+              {isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
