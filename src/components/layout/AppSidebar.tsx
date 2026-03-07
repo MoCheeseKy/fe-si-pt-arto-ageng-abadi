@@ -141,9 +141,6 @@ function NavContent() {
             <span className='font-extrabold text-[15px] text-white tracking-tight leading-tight'>
               Arto Ageng Abadi
             </span>
-            <span className='text-[9px] uppercase tracking-[0.2em] text-[#DC2626] font-bold mt-0.5'>
-              SIMOK ERP
-            </span>
           </div>
         </Link>
       </SidebarHeader>

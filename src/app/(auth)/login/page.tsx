@@ -38,7 +38,7 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
-    setServerError(null); // Reset error setiap kali submit
+    setServerError(null);
 
     try {
       // Panggil Route Handler internal Next.js (bukan lewat api.ts interceptor)
@@ -94,7 +94,7 @@ export default function LoginPage() {
           <div className='p-8'>
             <div className='mb-8 text-center'>
               <h1 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
-                SIMOK
+                Sistem Informasi Manajemen Operasional dan Keuangan
               </h1>
               <p className='text-sm text-muted-foreground mt-1 tracking-widest uppercase font-bold text-[10px]'>
                 PT. Arto Ageng Abadi

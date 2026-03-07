@@ -13,9 +13,11 @@ export function Topbar() {
     <header className='h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center justify-between px-4 sticky top-0 z-20 transition-colors'>
       <div className='flex items-center gap-4'>
         <SidebarTrigger className='text-muted-foreground hover:text-foreground' />
-        <h1 className='font-heading font-semibold text-lg tracking-tight hidden sm:block'>
-          SIMOK - Arto Ageng Abadi
-        </h1>
+        <div className='flex flex-col gap-2'>
+          <h1 className='font-heading font-semibold text-lg tracking-tight hidden sm:block'>
+            Sistem Informasi Manajemen Operasional dan Keuangan
+          </h1>
+        </div>
       </div>
 
       <div className='flex items-center gap-2'>

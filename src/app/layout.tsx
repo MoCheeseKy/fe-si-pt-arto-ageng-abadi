@@ -14,7 +14,8 @@ const bodyFont = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'SIMOK - PT Arto Ageng Abadi',
+  title:
+    'Sistem Informasi Manajemen Operasional dan Keuangan - PT Arto Ageng Abadi',
   description: 'Sistem Informasi Manajemen Operasional dan Keuangan',
 };
 
