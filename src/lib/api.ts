@@ -1,9 +1,15 @@
-// src/lib/api.ts
 import { GenericResponse } from '@/types';
 
-// Base URL diarahkan ke internal API route Next.js secara default untuk menghandle httpOnly cookie
-// Atau langsung ke backend jika env diatur demikian
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+// Helper untuk mengambil token dari cookie di sisi Client
+function getAuthTokenFromCookie(): string | null {
+  if (typeof window === 'undefined') return null;
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; auth_token=`);
+  if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+  return null;
+}
 
 async function fetchAPI<T>(
   endpoint: string,
@@ -13,6 +19,13 @@ async function fetchAPI<T>(
     'Content-Type': 'application/json',
   };
 
+  // 1. Ambil token dan set sebagai Authorization header jika ada
+  const token = getAuthTokenFromCookie();
+  if (token) {
+    (defaultHeaders as Record<string, string>)['Authorization'] =
+      `Bearer ${token}`;
+  }
+
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
     headers: {
@@ -20,6 +33,17 @@ async function fetchAPI<T>(
       ...options.headers,
     },
   });
+
+  // 2. Handle Unauthorized (401)
+  if (response.status === 401) {
+    if (typeof window !== 'undefined') {
+      // Clear cookie di sisi client & redirect ke login
+      document.cookie =
+        'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict';
+      window.location.href = '/login';
+    }
+    throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
+  }
 
   // Handle respons 204 No Content (biasanya untuk DELETE)
   if (response.status === 204) {

@@ -21,3 +21,13 @@ export const userSchema = z.object({
 });
 
 export type UserFormValues = z.infer<typeof userSchema>;
+
+export interface AuthResponse {
+  fullname: string;
+  email: string;
+  RoleId: string;
+  uid: string;
+  accessToken: string;
+  expiresAt: Date | string;
+  expiresIn: number;
+}
