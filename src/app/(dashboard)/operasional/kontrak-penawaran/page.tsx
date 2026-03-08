@@ -1,33 +1,39 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  FileText,
+  FileSignature,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  FileSignature,
-  KeySquare,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 import { format } from 'date-fns';
+import { z } from 'zod';
 
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/form/Input';
-import { SearchInput } from '@/components/form/SearchInput';
+import { NumberInput } from '@/components/form/NumberInput';
 import { Select } from '@/components/form/Select';
 import { DatePicker } from '@/components/form/DatePicker';
-import { NumberInput } from '@/components/form/NumberInput';
 import { DataTable } from '@/components/_shared/DataTable';
 import { Modal } from '@/components/_shared/Modal';
 import { TableActions } from '@/components/_shared/TableActions';
-import { Tabs } from '@/components/_shared/Tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,9 +45,25 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-const offerSchema = z.object({
+type TabTypes = 'offer' | 'key_term' | 'pjbg';
+
+// Schema Master untuk mencakup ke-3 form
+const contractSchema = z.object({
   customer_id: z.string().min(1, 'Customer wajib dipilih'),
+
+  // Shared & Key Term fields
   offer_number: z.string().optional(),
+  offer_date: z.string().optional(),
+  volume: z.coerce.number().optional(),
+  duration: z.string().optional(),
+  price_type: z.string().optional(),
+  moq: z.coerce.number().optional(),
+  billing_type: z.string().optional(),
+
+  // PJBG fields
+  contract_number: z.string().optional(),
+
+  // Offer fields
   date: z.string().optional(),
   implementation: z.string().optional(),
   monthly_cng_usage_volume: z.coerce.number().optional(),
@@ -55,552 +77,405 @@ const offerSchema = z.object({
   validity: z.string().optional(),
 });
 
-const pjbgSchema = z.object({
-  customer_id: z.string().min(1, 'Customer wajib dipilih'),
-  contract_number: z.string().optional(),
-  duration: z.string().optional(),
-});
+type ContractFormValues = z.infer<typeof contractSchema>;
 
-const keyTermSchema = z.object({
-  customer_id: z.string().min(1, 'Customer wajib dipilih'),
-  offer_number: z.string().optional(),
-  offer_date: z.string().optional(),
-  volume: z.coerce.number().optional(),
-  duration: z.string().optional(),
-  price_type: z.string().optional(),
-  moq: z.coerce.number().optional(),
-  billing_type: z.string().optional(),
-});
+const columnHelper = createColumnHelper<any>();
 
-type OfferFormValues = z.infer<typeof offerSchema>;
-type PjbgFormValues = z.infer<typeof pjbgSchema>;
-type KeyTermFormValues = z.infer<typeof keyTermSchema>;
-
-export interface OfferRow extends OfferFormValues {
-  id: string;
-  customer_name?: string;
-}
-export interface PjbgRow extends PjbgFormValues {
-  id: string;
-  customer_name?: string;
-}
-export interface KeyTermRow extends KeyTermFormValues {
-  id: string;
-  customer_name?: string;
+interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  total: number;
 }
 
-const offerHelper = createColumnHelper<OfferRow>();
-const pjbgHelper = createColumnHelper<PjbgRow>();
-const keyTermHelper = createColumnHelper<KeyTermRow>();
-
-/**
- * Halaman manajemen operasional Kontrak & Penawaran.
- * Menampilkan data Penawaran, Kontrak PJBG, dan Key Terms menggunakan antarmuka Tabs.
- *
- * @returns {JSX.Element} Komponen UI halaman Kontrak & Penawaran
- */
 export default function KontrakPenawaranPage() {
+  const [activeTab, setActiveTab] = useState<TabTypes>('offer');
+
+  const [data, setData] = useState<any[]>([]);
   const [customers, setCustomers] = useState<
     { label: string; value: string }[]
   >([]);
 
-  const [offers, setOffers] = useState<OfferRow[]>([]);
-  const [pjbgs, setPjbgs] = useState<PjbgRow[]>([]);
-  const [keyTerms, setKeyTerms] = useState<KeyTermRow[]>([]);
-
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [offerSearch, setOfferSearch] = useState('');
-  const [pjbgSearch, setPjbgSearch] = useState('');
-  const [keyTermSearch, setKeyTermSearch] = useState('');
+  // --- Server-Side States ---
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [sort, setSort] = useState<{ id: string; desc: boolean } | null>({
+    id: 'createdAt',
+    desc: true,
+  });
+  const [meta, setMeta] = useState<PaginationMeta>({
+    page: 1,
+    pageSize: 10,
+    pageCount: 0,
+    total: 0,
+  });
 
-  const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
-  const [offerEditId, setOfferEditId] = useState<string | null>(null);
+  // Filter States
+  const emptyFilters = { offer_number: '', contract_number: '' };
+  const [filterInput, setFilterInput] = useState(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  const [isPjbgModalOpen, setIsPjbgModalOpen] = useState(false);
-  const [pjbgEditId, setPjbgEditId] = useState<string | null>(null);
+  // Modal States
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [selectedData, setSelectedData] = useState<any | null>(null);
 
-  const [isKeyTermModalOpen, setIsKeyTermModalOpen] = useState(false);
-  const [keyTermEditId, setKeyTermEditId] = useState<string | null>(null);
-
-  const [deletingRecord, setDeletingRecord] = useState<{
-    id: string;
-    type: 'offer' | 'pjbg' | 'keyterm';
-  } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const offerForm = useForm<OfferFormValues>({
-    resolver: zodResolver(offerSchema as any),
-  });
-  const pjbgForm = useForm<PjbgFormValues>({
-    resolver: zodResolver(pjbgSchema as any),
-  });
-  const keyTermForm = useForm<KeyTermFormValues>({
-    resolver: zodResolver(keyTermSchema as any),
+  const form = useForm<ContractFormValues>({
+    resolver: zodResolver(contractSchema),
+    defaultValues: { customer_id: '' },
   });
 
-  /**
-   * Mengambil seluruh data relasional yang dibutuhkan secara paralel.
-   *
-   * @returns {Promise<void>}
-   */
+  const activeFilterCount = useMemo(() => {
+    return Object.values(appliedFilters).filter((val) => val !== '').length;
+  }, [appliedFilters]);
+
+  const endpointMap = {
+    offer: '/v1/offers',
+    key_term: '/v1/contract-key-terms',
+    pjbg: '/v1/contract-pjbgs',
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const res = await api.get<any>('/v1/customers?pageSize=1000');
+      const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+      setCustomers(
+        list.map((c: any) => ({ label: c.company_name, value: c.id })),
+      );
+    } catch (err) {
+      console.error('Gagal load customer', err);
+    }
+  };
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [custRes, offerRes, pjbgRes, ktRes] = await Promise.all([
-        api.get<any>('/v1/customers'),
-        api.get<any>('/v1/offers'),
-        api.get<any>('/v1/contract-pjbgs'),
-        api.get<any>('/v1/contract-key-terms'),
-      ]);
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('pageSize', pageSize.toString());
 
-      const custList = Array.isArray(custRes.data)
-        ? custRes.data
-        : custRes.data?.rows || [];
-      setCustomers(
-        custList.map((c: any) => ({ label: c.company_name, value: c.id })),
-      );
+      if (sort) {
+        params.append(
+          'order',
+          JSON.stringify([[sort.id, sort.desc ? 'DESC' : 'ASC']]),
+        );
+      }
 
-      const getCustomerName = (id: string) =>
-        custList.find((c: any) => c.id === id)?.company_name || 'Unknown';
+      if (appliedFilters.offer_number && activeTab !== 'pjbg')
+        params.append('offer_number', appliedFilters.offer_number);
+      if (appliedFilters.contract_number && activeTab === 'pjbg')
+        params.append('contract_number', appliedFilters.contract_number);
 
-      const mapData = (data: any[]) =>
-        data.map((item: any) => ({
-          ...item,
-          customer_name: getCustomerName(item.customer_id),
-        }));
+      const endpoint = endpointMap[activeTab];
+      const res = await api.get<any>(`${endpoint}?${params.toString()}`);
 
-      setOffers(
-        mapData(
-          Array.isArray(offerRes.data)
-            ? offerRes.data
-            : offerRes.data?.rows || [],
-        ),
-      );
-      setPjbgs(
-        mapData(
-          Array.isArray(pjbgRes.data) ? pjbgRes.data : pjbgRes.data?.rows || [],
-        ),
-      );
-      setKeyTerms(
-        mapData(
-          Array.isArray(ktRes.data) ? ktRes.data : ktRes.data?.rows || [],
-        ),
-      );
+      const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
+      const enrichedData = list.map((item: any) => ({
+        ...item,
+        customer_name:
+          customers.find((c) => c.value === item.customer_id)?.label ||
+          'Unknown Customer',
+      }));
+
+      setData(enrichedData);
+
+      if (res.meta?.pagination) {
+        setMeta(res.meta.pagination);
+      } else {
+        setMeta({ total: list.length, pageCount: 1, page: 1, pageSize: 10 });
+      }
     } catch (err: any) {
       setError(err.message || 'Gagal memuat data dari server.');
-      toast.error('Gagal memuat data');
+      toast.error('Gagal memuat data kontrak');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeTab, page, pageSize, sort, appliedFilters, customers]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchCustomers();
+  }, []);
+  useEffect(() => {
+    if (customers.length > 0) fetchData();
+  }, [fetchData, customers]);
 
-  /**
-   * Menangani submit untuk entitas Penawaran (Offer).
-   *
-   * @param {OfferFormValues} values - Data form penawaran
-   */
-  const onOfferSubmit = async (values: OfferFormValues) => {
+  const handleTabChange = (val: string) => {
+    setActiveTab(val as TabTypes);
+    setPage(1);
+    setSort({ id: 'createdAt', desc: true });
+    setAppliedFilters(emptyFilters);
+    setFilterInput(emptyFilters);
+  };
+
+  const handleSort = (columnId: string) => {
+    setSort((prev) => {
+      if (prev?.id === columnId) return { id: columnId, desc: !prev.desc };
+      return { id: columnId, desc: true };
+    });
+    setPage(1);
+  };
+
+  const applyFilters = () => {
+    setAppliedFilters(filterInput);
+    setPage(1);
+    setIsFilterOpen(false);
+  };
+  const resetFilters = () => {
+    setFilterInput(emptyFilters);
+    setAppliedFilters(emptyFilters);
+    setPage(1);
+    setIsFilterOpen(false);
+  };
+
+  const handleOpenDetail = (row: any) => {
+    setSelectedData(row);
+    setIsDetailOpen(true);
+  };
+
+  const handleOpenDialog = (row?: any) => {
+    if (row) {
+      setEditingId(row.id);
+      form.reset({
+        ...row,
+        date: row.date ? new Date(row.date).toISOString().split('T')[0] : '',
+        offer_date: row.offer_date
+          ? new Date(row.offer_date).toISOString().split('T')[0]
+          : '',
+      });
+    } else {
+      setEditingId(null);
+      form.reset({
+        customer_id: '',
+        date: new Date().toISOString().split('T')[0],
+        offer_date: new Date().toISOString().split('T')[0],
+      });
+    }
+    setIsDialogOpen(true);
+  };
+
+  const onSubmit = async (values: ContractFormValues) => {
     try {
-      if (offerEditId) {
-        await api.put(`/v1/offers/${offerEditId}`, values);
-        toast.success('Penawaran berhasil diperbarui.');
-      } else {
-        await api.post('/v1/offers', values);
-        toast.success('Penawaran baru berhasil ditambahkan.');
+      const endpoint = endpointMap[activeTab];
+
+      let payload: any = { customer_id: values.customer_id };
+
+      if (activeTab === 'offer') {
+        payload = {
+          ...payload,
+          offer_number: values.offer_number,
+          date: values.date,
+          implementation: values.implementation,
+          monthly_cng_usage_volume: values.monthly_cng_usage_volume,
+          standard_ghv_specification: values.standard_ghv_specification,
+          cng_mother_station_location: values.cng_mother_station_location,
+          cng_gas_price_per_sm3: values.cng_gas_price_per_sm3,
+          payment_method: values.payment_method,
+          price_includes: values.price_includes,
+          contract_period: values.contract_period,
+          preparation_time: values.preparation_time,
+          validity: values.validity,
+        };
+      } else if (activeTab === 'key_term') {
+        payload = {
+          ...payload,
+          offer_number: values.offer_number,
+          offer_date: values.offer_date,
+          volume: values.volume,
+          duration: values.duration,
+          price_type: values.price_type,
+          moq: values.moq,
+          billing_type: values.billing_type,
+        };
+      } else if (activeTab === 'pjbg') {
+        payload = {
+          ...payload,
+          contract_number: values.contract_number,
+          duration: values.duration,
+        };
       }
-      setIsOfferModalOpen(false);
+
+      if (editingId) {
+        await api.put(`${endpoint}/${editingId}`, payload);
+        toast.success('Data berhasil diperbarui.');
+      } else {
+        await api.post(endpoint, payload);
+        toast.success('Data baru berhasil ditambahkan.');
+      }
+      setIsDialogOpen(false);
       fetchData();
     } catch (err: any) {
-      toast.error(err.message || 'Gagal menyimpan penawaran.');
+      toast.error(err.message || 'Terjadi kesalahan saat menyimpan data.');
     }
   };
 
-  /**
-   * Menangani submit untuk entitas Kontrak PJBG.
-   *
-   * @param {PjbgFormValues} values - Data form PJBG
-   */
-  const onPjbgSubmit = async (values: PjbgFormValues) => {
-    try {
-      if (pjbgEditId) {
-        await api.put(`/v1/contract-pjbgs/${pjbgEditId}`, values);
-        toast.success('Kontrak PJBG berhasil diperbarui.');
-      } else {
-        await api.post('/v1/contract-pjbgs', values);
-        toast.success('Kontrak PJBG baru berhasil ditambahkan.');
-      }
-      setIsPjbgModalOpen(false);
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.message || 'Gagal menyimpan kontrak PJBG.');
-    }
-  };
-
-  /**
-   * Menangani submit untuk entitas Key Term.
-   *
-   * @param {KeyTermFormValues} values - Data form Key Term
-   */
-  const onKeyTermSubmit = async (values: KeyTermFormValues) => {
-    try {
-      if (keyTermEditId) {
-        await api.put(`/v1/contract-key-terms/${keyTermEditId}`, values);
-        toast.success('Key Term berhasil diperbarui.');
-      } else {
-        await api.post('/v1/contract-key-terms', values);
-        toast.success('Key Term baru berhasil ditambahkan.');
-      }
-      setIsKeyTermModalOpen(false);
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.message || 'Gagal menyimpan Key Term.');
-    }
-  };
-
-  /**
-   * Menghapus rekaman berdasarkan tipe entitas yang dipilih.
-   */
   const handleDelete = async () => {
-    if (!deletingRecord) return;
+    if (!deletingId) return;
     setIsDeleting(true);
-    let endpoint = '';
-    if (deletingRecord.type === 'offer') endpoint = '/v1/offers';
-    else if (deletingRecord.type === 'pjbg') endpoint = '/v1/contract-pjbgs';
-    else endpoint = '/v1/contract-key-terms';
-
     try {
-      await api.delete(`${endpoint}/${deletingRecord.id}`);
+      await api.delete(`${endpointMap[activeTab]}/${deletingId}`);
       toast.success('Data berhasil dihapus.');
       fetchData();
     } catch (err: any) {
       toast.error(err.message || 'Gagal menghapus data.');
     } finally {
       setIsDeleting(false);
-      setDeletingRecord(null);
+      setDeletingId(null);
     }
   };
 
-  // --- FILTER LOGIC ---
-  const filteredOffers = useMemo(
-    () =>
-      offers.filter((o) =>
-        (o.offer_number || '')
-          .toLowerCase()
-          .includes(offerSearch.toLowerCase()),
-      ),
-    [offers, offerSearch],
-  );
-  const filteredPjbgs = useMemo(
-    () =>
-      pjbgs.filter((p) =>
-        (p.contract_number || '')
-          .toLowerCase()
-          .includes(pjbgSearch.toLowerCase()),
-      ),
-    [pjbgs, pjbgSearch],
-  );
-  const filteredKeyTerms = useMemo(
-    () =>
-      keyTerms.filter((k) =>
-        (k.offer_number || '')
-          .toLowerCase()
-          .includes(keyTermSearch.toLowerCase()),
-      ),
-    [keyTerms, keyTermSearch],
+  const SortIcon = ({ columnId }: { columnId: string }) => (
+    <ArrowUpDown
+      className={`ml-2 h-3 w-3 ${sort?.id === columnId ? 'text-primary' : 'text-muted-foreground/50'}`}
+    />
   );
 
-  // --- COLUMNS ---
-  const offerColumns = useMemo(
-    () => [
-      offerHelper.accessor('offer_number', {
-        header: ({ column }) => (
+  // --- Dynamic Table Columns ---
+  const getColumns = () => {
+    const baseCols = [
+      columnHelper.accessor('customer_name', {
+        header: () => (
           <Button
             variant='ghost'
-            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className='p-0 font-bold uppercase hover:bg-transparent'
+            onClick={() => handleSort('customer_id')}
           >
-            No. Penawaran <ArrowUpDown className='ml-2 h-3 w-3' />
+            Customer <SortIcon columnId='customer_id' />
           </Button>
         ),
         cell: (info) => (
-          <span className='font-mono font-semibold text-primary'>
-            {info.getValue() || '-'}
-          </span>
+          <span className='font-semibold'>{info.getValue()}</span>
         ),
       }),
-      offerHelper.accessor('date', {
-        header: 'Tanggal',
-        cell: (info) => (
-          <span className='text-muted-foreground'>
-            {info.getValue()
-              ? format(new Date(info.getValue()!), 'dd MMM yyyy')
-              : '-'}
-          </span>
-        ),
-      }),
-      offerHelper.accessor('customer_name', {
-        header: 'Customer',
-        cell: (info) => (
-          <span className='font-medium text-foreground'>{info.getValue()}</span>
-        ),
-      }),
-      offerHelper.accessor('monthly_cng_usage_volume', {
-        header: 'Vol. Bulanan',
-        cell: (info) => (
-          <span className='font-mono'>
-            {info.getValue()?.toLocaleString('id-ID') || 0}
-          </span>
-        ),
-      }),
-      offerHelper.display({
+    ];
+
+    if (activeTab === 'offer') {
+      baseCols.push(
+        columnHelper.accessor('offer_number', {
+          header: 'Nomor Penawaran',
+          cell: (info) => (
+            <span className='font-mono text-primary font-medium'>
+              {info.getValue() || '-'}
+            </span>
+          ),
+        }),
+        columnHelper.accessor('date', {
+          header: 'Tanggal',
+          cell: (info) => (
+            <span>
+              {info.getValue()
+                ? format(new Date(info.getValue()), 'dd MMM yyyy')
+                : '-'}
+            </span>
+          ),
+        }),
+        columnHelper.accessor('monthly_cng_usage_volume', {
+          header: 'Vol Bulanan',
+          cell: (info) => (
+            <span className='font-mono'>{info.getValue() || 0}</span>
+          ),
+        }),
+        columnHelper.accessor('cng_gas_price_per_sm3', {
+          header: 'Harga/SM3',
+          cell: (info) => (
+            <span className='font-mono text-emerald-600'>
+              Rp {(info.getValue() || 0).toLocaleString('id-ID')}
+            </span>
+          ),
+        }),
+      );
+    } else if (activeTab === 'key_term') {
+      baseCols.push(
+        columnHelper.accessor('offer_number', {
+          header: 'Nomor Penawaran',
+          cell: (info) => (
+            <span className='font-mono text-primary font-medium'>
+              {info.getValue() || '-'}
+            </span>
+          ),
+        }),
+        columnHelper.accessor('offer_date', {
+          header: 'Tgl Penawaran',
+          cell: (info) => (
+            <span>
+              {info.getValue()
+                ? format(new Date(info.getValue()), 'dd MMM yyyy')
+                : '-'}
+            </span>
+          ),
+        }),
+        columnHelper.accessor('volume', {
+          header: 'Volume',
+          cell: (info) => (
+            <span className='font-mono'>{info.getValue() || 0}</span>
+          ),
+        }),
+        columnHelper.accessor('duration', {
+          header: 'Durasi',
+          cell: (info) => <span>{info.getValue() || '-'}</span>,
+        }),
+      );
+    } else if (activeTab === 'pjbg') {
+      baseCols.push(
+        columnHelper.accessor('contract_number', {
+          header: 'Nomor Kontrak',
+          cell: (info) => (
+            <span className='font-mono text-primary font-medium'>
+              {info.getValue() || '-'}
+            </span>
+          ),
+        }),
+        columnHelper.accessor('duration', {
+          header: 'Durasi',
+          cell: (info) => <span>{info.getValue() || '-'}</span>,
+        }),
+      );
+    }
+
+    baseCols.push(
+      columnHelper.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
           <TableActions
-            onEdit={() => {
-              setOfferEditId(info.row.original.id);
-              offerForm.reset({
-                ...info.row.original,
-                date: info.row.original.date
-                  ? new Date(info.row.original.date).toISOString().split('T')[0]
-                  : '',
-              });
-              setIsOfferModalOpen(true);
-            }}
-            onDelete={() =>
-              setDeletingRecord({ id: info.row.original.id, type: 'offer' })
-            }
+            onView={() => handleOpenDetail(info.row.original)}
+            onEdit={() => handleOpenDialog(info.row.original)}
+            onDelete={() => setDeletingId(info.row.original.id)}
           />
         ),
       }),
-    ],
-    [offerForm],
-  );
-
-  const pjbgColumns = useMemo(
-    () => [
-      pjbgHelper.accessor('contract_number', {
-        header: ({ column }) => (
-          <Button
-            variant='ghost'
-            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            No. Kontrak <ArrowUpDown className='ml-2 h-3 w-3' />
-          </Button>
-        ),
-        cell: (info) => (
-          <span className='font-mono font-semibold text-primary'>
-            {info.getValue() || '-'}
-          </span>
-        ),
-      }),
-      pjbgHelper.accessor('customer_name', {
-        header: 'Customer',
-        cell: (info) => (
-          <span className='font-medium text-foreground'>{info.getValue()}</span>
-        ),
-      }),
-      pjbgHelper.accessor('duration', {
-        header: 'Durasi Kontrak',
-        cell: (info) => <span>{info.getValue() || '-'}</span>,
-      }),
-      pjbgHelper.display({
-        id: 'actions',
-        header: () => <div className='text-right'>Aksi</div>,
-        cell: (info) => (
-          <TableActions
-            onEdit={() => {
-              setPjbgEditId(info.row.original.id);
-              pjbgForm.reset(info.row.original);
-              setIsPjbgModalOpen(true);
-            }}
-            onDelete={() =>
-              setDeletingRecord({ id: info.row.original.id, type: 'pjbg' })
-            }
-          />
-        ),
-      }),
-    ],
-    [pjbgForm],
-  );
-
-  const keyTermColumns = useMemo(
-    () => [
-      keyTermHelper.accessor('offer_number', {
-        header: ({ column }) => (
-          <Button
-            variant='ghost'
-            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            Ref. Penawaran <ArrowUpDown className='ml-2 h-3 w-3' />
-          </Button>
-        ),
-        cell: (info) => (
-          <span className='font-mono font-semibold text-primary'>
-            {info.getValue() || '-'}
-          </span>
-        ),
-      }),
-      keyTermHelper.accessor('customer_name', {
-        header: 'Customer',
-        cell: (info) => (
-          <span className='font-medium text-foreground'>{info.getValue()}</span>
-        ),
-      }),
-      keyTermHelper.accessor('volume', {
-        header: 'Volume',
-        cell: (info) => (
-          <span className='font-mono text-emerald-500'>
-            {info.getValue()?.toLocaleString('id-ID') || 0}
-          </span>
-        ),
-      }),
-      keyTermHelper.accessor('price_type', {
-        header: 'Tipe Harga',
-        cell: (info) => <span>{info.getValue() || '-'}</span>,
-      }),
-      keyTermHelper.display({
-        id: 'actions',
-        header: () => <div className='text-right'>Aksi</div>,
-        cell: (info) => (
-          <TableActions
-            onEdit={() => {
-              setKeyTermEditId(info.row.original.id);
-              keyTermForm.reset({
-                ...info.row.original,
-                offer_date: info.row.original.offer_date
-                  ? new Date(info.row.original.offer_date)
-                      .toISOString()
-                      .split('T')[0]
-                  : '',
-              });
-              setIsKeyTermModalOpen(true);
-            }}
-            onDelete={() =>
-              setDeletingRecord({ id: info.row.original.id, type: 'keyterm' })
-            }
-          />
-        ),
-      }),
-    ],
-    [keyTermForm],
-  );
-
-  const tabsContent = [
-    {
-      label: 'Penawaran (Offer)',
-      value: 'offer',
-      content: (
-        <div className='space-y-4'>
-          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
-            <SearchInput
-              value={offerSearch}
-              onChange={(e) => setOfferSearch(e.target.value)}
-              placeholder='Cari No. Penawaran...'
-            />
-            <Button
-              onClick={() => {
-                setOfferEditId(null);
-                offerForm.reset({});
-                setIsOfferModalOpen(true);
-              }}
-              className='bg-primary hover:bg-primary/90 text-white'
-            >
-              <Plus className='w-4 h-4 mr-2' /> Buat Penawaran
-            </Button>
-          </div>
-          <DataTable
-            columns={offerColumns as any}
-            data={filteredOffers}
-            isLoading={isLoading}
-            emptyMessage='Belum ada data penawaran.'
-          />
-        </div>
-      ),
-    },
-    {
-      label: 'Kontrak PJBG',
-      value: 'pjbg',
-      content: (
-        <div className='space-y-4'>
-          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
-            <SearchInput
-              value={pjbgSearch}
-              onChange={(e) => setPjbgSearch(e.target.value)}
-              placeholder='Cari No. Kontrak...'
-            />
-            <Button
-              onClick={() => {
-                setPjbgEditId(null);
-                pjbgForm.reset({});
-                setIsPjbgModalOpen(true);
-              }}
-              className='bg-primary hover:bg-primary/90 text-white'
-            >
-              <Plus className='w-4 h-4 mr-2' /> Tambah PJBG
-            </Button>
-          </div>
-          <DataTable
-            columns={pjbgColumns as any}
-            data={filteredPjbgs}
-            isLoading={isLoading}
-            emptyMessage='Belum ada data Kontrak PJBG.'
-          />
-        </div>
-      ),
-    },
-    {
-      label: 'Key Terms',
-      value: 'keyterm',
-      content: (
-        <div className='space-y-4'>
-          <div className='flex flex-col sm:flex-row justify-between gap-4 p-4 bg-muted/20 border border-border rounded-t-xl'>
-            <SearchInput
-              value={keyTermSearch}
-              onChange={(e) => setKeyTermSearch(e.target.value)}
-              placeholder='Cari Ref. Penawaran...'
-            />
-            <Button
-              onClick={() => {
-                setKeyTermEditId(null);
-                keyTermForm.reset({});
-                setIsKeyTermModalOpen(true);
-              }}
-              className='bg-primary hover:bg-primary/90 text-white'
-            >
-              <Plus className='w-4 h-4 mr-2' /> Tambah Key Term
-            </Button>
-          </div>
-          <DataTable
-            columns={keyTermColumns as any}
-            data={filteredKeyTerms}
-            isLoading={isLoading}
-            emptyMessage='Belum ada data Key Terms.'
-          />
-        </div>
-      ),
-    },
-  ];
+    );
+    return baseCols;
+  };
 
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
-      <div className='flex flex-col gap-1'>
-        <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
-          Kontrak & Penawaran
-        </h2>
-        <p className='text-sm text-muted-foreground'>
-          Manajemen dokumen penawaran harga, kontrak PJBG, dan Key Terms
-          pelanggan.
-        </p>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
+        <div>
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
+            <FileSignature className='w-6 h-6 text-primary' /> Kontrak &
+            Penawaran
+          </h2>
+          <p className='text-sm text-muted-foreground mt-1'>
+            Kelola dokumen penawaran harga, Key Terms, dan kontrak PJBG
+            pelanggan.
+          </p>
+        </div>
+        <Button
+          onClick={() => handleOpenDialog()}
+          className='bg-primary hover:bg-primary/90 text-white shadow-md'
+        >
+          <Plus className='w-4 h-4 mr-2' /> Buat Baru
+        </Button>
       </div>
 
       {error && !isLoading && (
@@ -620,265 +495,506 @@ export default function KontrakPenawaranPage() {
         </div>
       )}
 
-      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden p-2'>
-        <Tabs tabs={tabsContent} defaultValue='offer' />
-      </div>
-
-      {/* MODAL OFFER */}
-      <Modal
-        isOpen={isOfferModalOpen}
-        onClose={() => setIsOfferModalOpen(false)}
-        title={offerEditId ? 'Edit Penawaran' : 'Buat Penawaran Baru'}
-        size='xl'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsOfferModalOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='offer-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={offerForm.formState.isSubmitting}
-            >
-              {offerForm.formState.isSubmitting
-                ? 'Menyimpan...'
-                : 'Simpan Penawaran'}
-            </Button>
-          </div>
-        }
+      <Tabs
+        value={activeTab}
+        onValueChange={handleTabChange}
+        className='w-full bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'
       >
-        <form
-          id='offer-form'
-          onSubmit={offerForm.handleSubmit(onOfferSubmit)}
-          className='space-y-6 py-2'
-        >
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
-            <Select
-              label='Customer'
-              required
-              options={customers}
-              value={offerForm.watch('customer_id')}
-              onChange={(val) => offerForm.setValue('customer_id', val)}
-              error={offerForm.formState.errors.customer_id?.message}
-            />
-            <Input
-              label='Nomor Penawaran'
-              placeholder='OFF/2026/...'
-              error={offerForm.formState.errors.offer_number?.message}
-              {...offerForm.register('offer_number')}
-            />
-            <DatePicker
-              label='Tanggal Penawaran'
-              value={offerForm.watch('date')}
-              onChange={(val) => offerForm.setValue('date', val)}
-            />
-            <Input
-              label='Implementasi'
-              placeholder='Deskripsi implementasi'
-              {...offerForm.register('implementation')}
-            />
-            <NumberInput
-              label='Estimasi Volume Bulanan'
-              value={offerForm.watch('monthly_cng_usage_volume')}
-              onChange={(val) =>
-                offerForm.setValue('monthly_cng_usage_volume', val)
-              }
-            />
-            <NumberInput
-              label='Harga Gas per Sm3 (IDR)'
-              value={offerForm.watch('cng_gas_price_per_sm3')}
-              onChange={(val) =>
-                offerForm.setValue('cng_gas_price_per_sm3', val)
-              }
-              className='text-emerald-500'
-            />
-            <Input
-              label='Spesifikasi Standar GHV'
-              placeholder='Contoh: 1000 BTU/scf'
-              {...offerForm.register('standard_ghv_specification')}
-            />
-            <Input
-              label='Lokasi Mother Station'
-              placeholder='Lokasi stasiun pengisian'
-              {...offerForm.register('cng_mother_station_location')}
-            />
-            <Input
-              label='Metode Pembayaran'
-              placeholder='Contoh: Net 30 Days'
-              {...offerForm.register('payment_method')}
-            />
-            <Input
-              label='Durasi Kontrak'
-              placeholder='Contoh: 1 Tahun'
-              {...offerForm.register('contract_period')}
-            />
-            <Input
-              label='Waktu Persiapan'
-              placeholder='Contoh: 2 Minggu'
-              {...offerForm.register('preparation_time')}
-            />
-            <Input
-              label='Masa Berlaku Penawaran'
-              placeholder='Contoh: 14 Hari'
-              {...offerForm.register('validity')}
-            />
-          </div>
-          <Input
-            label='Harga Termasuk (Price Includes)'
-            placeholder='Deskripsi apa saja yang termasuk dalam harga'
-            {...offerForm.register('price_includes')}
-          />
-        </form>
-      </Modal>
+        {/* TAB LIST & ACTION BAR */}
+        <div className='p-4 border-b border-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-muted/20'>
+          <TabsList className='bg-background border border-border'>
+            <TabsTrigger value='offer'>Penawaran (Offers)</TabsTrigger>
+            <TabsTrigger value='key_term'>Key Terms</TabsTrigger>
+            <TabsTrigger value='pjbg'>Kontrak PJBG</TabsTrigger>
+          </TabsList>
 
-      {/* MODAL PJBG */}
+          <div className='flex items-center gap-4 w-full md:w-auto justify-between'>
+            <div className='text-sm font-medium text-muted-foreground'>
+              Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+              Data
+            </div>
+
+            <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant='outline'
+                  className='border-border shadow-sm flex items-center gap-2 relative bg-background'
+                >
+                  <Filter className='w-4 h-4 text-muted-foreground' />
+                  Filter
+                  {activeFilterCount > 0 && (
+                    <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className='w-80 p-4 rounded-xl border-border shadow-lg'
+                align='end'
+              >
+                <div className='space-y-4'>
+                  <h4 className='font-heading font-bold text-sm text-foreground'>
+                    Filter Spesifik
+                  </h4>
+                  <div className='space-y-3'>
+                    {activeTab !== 'pjbg' && (
+                      <Input
+                        label='Nomor Penawaran'
+                        placeholder='Ketik No Offer...'
+                        value={filterInput.offer_number}
+                        onChange={(e) =>
+                          setFilterInput({
+                            ...filterInput,
+                            offer_number: e.target.value,
+                          })
+                        }
+                      />
+                    )}
+                    {activeTab === 'pjbg' && (
+                      <Input
+                        label='Nomor Kontrak'
+                        placeholder='Ketik No Kontrak...'
+                        value={filterInput.contract_number}
+                        onChange={(e) =>
+                          setFilterInput({
+                            ...filterInput,
+                            contract_number: e.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                  <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
+                    <Button variant='ghost' size='sm' onClick={resetFilters}>
+                      Reset
+                    </Button>
+                    <Button
+                      size='sm'
+                      onClick={applyFilters}
+                      className='bg-primary text-white'
+                    >
+                      Terapkan
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+
+        {/* TAB CONTENTS */}
+        <TabsContent value={activeTab} className='m-0 border-none outline-none'>
+          <DataTable
+            columns={getColumns()}
+            data={data}
+            isLoading={isLoading}
+            emptyMessage={`Belum ada data untuk kategori ${activeTab}.`}
+          />
+        </TabsContent>
+
+        {/* CUSTOM PAGINATION FOOTER */}
+        {!isLoading && meta.total > 0 && (
+          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
+            <div className='text-sm text-muted-foreground'>
+              Menampilkan{' '}
+              <span className='font-semibold text-foreground'>
+                {(page - 1) * pageSize + 1}
+              </span>{' '}
+              -{' '}
+              <span className='font-semibold text-foreground'>
+                {Math.min(page * pageSize, meta.total)}
+              </span>{' '}
+              dari{' '}
+              <span className='font-semibold text-foreground'>
+                {meta.total}
+              </span>{' '}
+              data
+            </div>
+            <div className='flex items-center gap-4'>
+              <select
+                className='h-8 rounded-md border border-border bg-background px-2 text-sm'
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+              >
+                {[5, 10, 20, 50].map((size) => (
+                  <option key={size} value={size}>
+                    {size} per hal
+                  </option>
+                ))}
+              </select>
+              <div className='flex items-center gap-1'>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-8 w-8'
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                >
+                  <ChevronLeft className='h-4 w-4' />
+                </Button>
+                <div className='flex items-center justify-center w-12 text-sm font-medium'>
+                  {page} / {meta.pageCount || 1}
+                </div>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-8 w-8'
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={page >= (meta.pageCount || 1)}
+                >
+                  <ChevronRight className='h-4 w-4' />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Tabs>
+
+      {/* MODAL VIEW DETAIL */}
       <Modal
-        isOpen={isPjbgModalOpen}
-        onClose={() => setIsPjbgModalOpen(false)}
-        title={pjbgEditId ? 'Edit Kontrak PJBG' : 'Tambah Kontrak PJBG'}
+        isOpen={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+        title={`Detail Dokumen`}
         size='md'
         footer={
+          <div className='flex justify-end w-full'>
+            <Button variant='outline' onClick={() => setIsDetailOpen(false)}>
+              Tutup
+            </Button>
+          </div>
+        }
+      >
+        {selectedData && (
+          <div className='space-y-5 py-2'>
+            <div className='flex items-center gap-3 pb-3 border-b border-border/50'>
+              <div className='h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center text-primary'>
+                <FileSignature className='h-5 w-5' />
+              </div>
+              <div>
+                <p className='text-sm text-muted-foreground'>
+                  Customer / Perusahaan
+                </p>
+                <p className='text-lg font-bold text-foreground'>
+                  {selectedData.customer_name}
+                </p>
+              </div>
+            </div>
+
+            <div className='grid grid-cols-2 gap-4'>
+              {selectedData.offer_number && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>
+                    Nomor Penawaran
+                  </p>
+                  <p className='font-medium text-sm font-mono text-primary'>
+                    {selectedData.offer_number}
+                  </p>
+                </div>
+              )}
+              {selectedData.contract_number && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>
+                    Nomor Kontrak PJBG
+                  </p>
+                  <p className='font-medium text-sm font-mono text-primary'>
+                    {selectedData.contract_number}
+                  </p>
+                </div>
+              )}
+              {selectedData.date && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>Tanggal</p>
+                  <p className='font-medium text-sm'>
+                    {format(new Date(selectedData.date), 'dd MMM yyyy')}
+                  </p>
+                </div>
+              )}
+              {selectedData.offer_date && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>
+                    Tanggal Penawaran
+                  </p>
+                  <p className='font-medium text-sm'>
+                    {format(new Date(selectedData.offer_date), 'dd MMM yyyy')}
+                  </p>
+                </div>
+              )}
+              {selectedData.duration && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>
+                    Durasi Kontrak
+                  </p>
+                  <p className='font-medium text-sm'>{selectedData.duration}</p>
+                </div>
+              )}
+              {selectedData.contract_period && (
+                <div>
+                  <p className='text-xs text-muted-foreground'>
+                    Periode Kontrak
+                  </p>
+                  <p className='font-medium text-sm'>
+                    {selectedData.contract_period}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {activeTab === 'offer' && (
+              <div className='space-y-3 bg-muted/20 p-4 rounded-lg border border-border/50 mt-2'>
+                <h4 className='text-xs font-bold uppercase tracking-wider text-muted-foreground'>
+                  Spesifikasi Penawaran
+                </h4>
+                <div className='grid grid-cols-2 gap-4'>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>
+                      Harga per SM3
+                    </p>
+                    <p className='font-semibold font-mono text-emerald-600 text-sm'>
+                      Rp{' '}
+                      {(selectedData.cng_gas_price_per_sm3 || 0).toLocaleString(
+                        'id-ID',
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>Vol Bulanan</p>
+                    <p className='font-semibold text-sm'>
+                      {selectedData.monthly_cng_usage_volume || 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>
+                      Metode Pembayaran
+                    </p>
+                    <p className='font-medium text-sm'>
+                      {selectedData.payment_method || '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>
+                      Masa Berlaku
+                    </p>
+                    <p className='font-medium text-sm'>
+                      {selectedData.validity || '-'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'key_term' && (
+              <div className='space-y-3 bg-muted/20 p-4 rounded-lg border border-border/50 mt-2'>
+                <div className='grid grid-cols-2 gap-4'>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>Volume</p>
+                    <p className='font-semibold text-sm'>
+                      {selectedData.volume || 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>
+                      Minimum Order Qty
+                    </p>
+                    <p className='font-semibold text-sm'>
+                      {selectedData.moq || 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>Tipe Harga</p>
+                    <p className='font-medium text-sm'>
+                      {selectedData.price_type || '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className='text-xs text-muted-foreground'>
+                      Tipe Penagihan
+                    </p>
+                    <p className='font-medium text-sm'>
+                      {selectedData.billing_type || '-'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* MODAL FORM CREATE / EDIT */}
+      <Modal
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        title={
+          editingId
+            ? `Edit ${activeTab.toUpperCase()}`
+            : `Buat Dokumen - ${activeTab.toUpperCase()}`
+        }
+        size={activeTab === 'offer' ? 'lg' : 'md'}
+        footer={
           <div className='flex justify-end gap-3 w-full'>
             <Button
               type='button'
               variant='ghost'
-              onClick={() => setIsPjbgModalOpen(false)}
+              onClick={() => setIsDialogOpen(false)}
             >
               Batal
             </Button>
             <Button
               type='submit'
-              form='pjbg-form'
+              form='contract-form'
               className='bg-primary hover:bg-primary/90 text-white'
-              disabled={pjbgForm.formState.isSubmitting}
+              disabled={form.formState.isSubmitting}
             >
-              {pjbgForm.formState.isSubmitting
-                ? 'Menyimpan...'
-                : 'Simpan Kontrak'}
+              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
             </Button>
           </div>
         }
       >
         <form
-          id='pjbg-form'
-          onSubmit={pjbgForm.handleSubmit(onPjbgSubmit)}
+          id='contract-form'
+          onSubmit={form.handleSubmit(onSubmit)}
           className='space-y-5 py-2'
         >
           <Select
-            label='Customer'
+            label='Pilih Customer'
             required
             options={customers}
-            value={pjbgForm.watch('customer_id')}
-            onChange={(val) => pjbgForm.setValue('customer_id', val)}
-            error={pjbgForm.formState.errors.customer_id?.message}
+            value={form.watch('customer_id')}
+            onChange={(val) => form.setValue('customer_id', val)}
+            error={form.formState.errors.customer_id?.message}
           />
-          <Input
-            label='Nomor Kontrak'
-            placeholder='PJBG/2026/...'
-            error={pjbgForm.formState.errors.contract_number?.message}
-            {...pjbgForm.register('contract_number')}
-          />
-          <Input
-            label='Durasi Kontrak'
-            placeholder='Contoh: 2 Tahun'
-            error={pjbgForm.formState.errors.duration?.message}
-            {...pjbgForm.register('duration')}
-          />
+
+          {/* Fields Offer */}
+          {activeTab === 'offer' && (
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+              <Input
+                label='Nomor Penawaran'
+                {...form.register('offer_number')}
+              />
+              <DatePicker
+                label='Tanggal Penawaran'
+                value={form.watch('date')}
+                onChange={(val) => form.setValue('date', val)}
+              />
+              <NumberInput
+                label='Volume Pemakaian Bulanan'
+                value={form.watch('monthly_cng_usage_volume')}
+                onChange={(val) =>
+                  form.setValue('monthly_cng_usage_volume', val)
+                }
+              />
+              <NumberInput
+                label='Harga Gas CNG (Rp/SM3)'
+                value={form.watch('cng_gas_price_per_sm3')}
+                onChange={(val) => form.setValue('cng_gas_price_per_sm3', val)}
+              />
+              <Input
+                label='Pelaksanaan (Implementation)'
+                {...form.register('implementation')}
+              />
+              <Input
+                label='Spesifikasi GHV Standar'
+                {...form.register('standard_ghv_specification')}
+              />
+              <Input
+                label='Lokasi Mother Station'
+                {...form.register('cng_mother_station_location')}
+              />
+              <Input
+                label='Harga Termasuk (Price Includes)'
+                {...form.register('price_includes')}
+              />
+              <Input
+                label='Metode Pembayaran'
+                {...form.register('payment_method')}
+              />
+              <Input
+                label='Periode Kontrak'
+                {...form.register('contract_period')}
+              />
+              <Input
+                label='Waktu Persiapan'
+                {...form.register('preparation_time')}
+              />
+              <Input
+                label='Masa Berlaku (Validity)'
+                {...form.register('validity')}
+              />
+            </div>
+          )}
+
+          {/* Fields Key Term */}
+          {activeTab === 'key_term' && (
+            <div className='space-y-4'>
+              <div className='grid grid-cols-2 gap-4'>
+                <Input
+                  label='Nomor Penawaran Referensi'
+                  {...form.register('offer_number')}
+                />
+                <DatePicker
+                  label='Tanggal Referensi'
+                  value={form.watch('offer_date')}
+                  onChange={(val) => form.setValue('offer_date', val)}
+                />
+              </div>
+              <div className='grid grid-cols-2 gap-4'>
+                <NumberInput
+                  label='Volume Kesepakatan'
+                  value={form.watch('volume')}
+                  onChange={(val) => form.setValue('volume', val)}
+                />
+                <NumberInput
+                  label='Minimum Order Qty (MOQ)'
+                  value={form.watch('moq')}
+                  onChange={(val) => form.setValue('moq', val)}
+                />
+              </div>
+              <div className='grid grid-cols-2 gap-4'>
+                <Input
+                  label='Durasi Kontrak'
+                  placeholder='Cth: 1 Tahun'
+                  {...form.register('duration')}
+                />
+                <Input
+                  label='Tipe Penagihan'
+                  placeholder='Cth: Bulanan'
+                  {...form.register('billing_type')}
+                />
+              </div>
+              <Input
+                label='Tipe Harga'
+                placeholder='Cth: Fixed / Fluktuatif'
+                {...form.register('price_type')}
+              />
+            </div>
+          )}
+
+          {/* Fields PJBG */}
+          {activeTab === 'pjbg' && (
+            <div className='space-y-4'>
+              <Input
+                label='Nomor Kontrak Resmi (PJBG)'
+                required
+                {...form.register('contract_number')}
+              />
+              <Input
+                label='Durasi Kontrak'
+                placeholder='Cth: 2 Tahun'
+                {...form.register('duration')}
+              />
+            </div>
+          )}
         </form>
       </Modal>
 
-      {/* MODAL KEY TERM */}
-      <Modal
-        isOpen={isKeyTermModalOpen}
-        onClose={() => setIsKeyTermModalOpen(false)}
-        title={keyTermEditId ? 'Edit Key Term' : 'Tambah Key Term'}
-        size='lg'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsKeyTermModalOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='keyterm-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={keyTermForm.formState.isSubmitting}
-            >
-              {keyTermForm.formState.isSubmitting
-                ? 'Menyimpan...'
-                : 'Simpan Key Term'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='keyterm-form'
-          onSubmit={keyTermForm.handleSubmit(onKeyTermSubmit)}
-          className='grid grid-cols-1 md:grid-cols-2 gap-5 py-2'
-        >
-          <div className='col-span-1 md:col-span-2'>
-            <Select
-              label='Customer'
-              required
-              options={customers}
-              value={keyTermForm.watch('customer_id')}
-              onChange={(val) => keyTermForm.setValue('customer_id', val)}
-              error={keyTermForm.formState.errors.customer_id?.message}
-            />
-          </div>
-          <Input
-            label='Nomor Penawaran (Ref)'
-            placeholder='OFF/...'
-            {...keyTermForm.register('offer_number')}
-          />
-          <DatePicker
-            label='Tanggal Penawaran'
-            value={keyTermForm.watch('offer_date')}
-            onChange={(val) => keyTermForm.setValue('offer_date', val)}
-          />
-          <NumberInput
-            label='Volume'
-            value={keyTermForm.watch('volume')}
-            onChange={(val) => keyTermForm.setValue('volume', val)}
-          />
-          <NumberInput
-            label='MOQ (Minimum Order Quantity)'
-            value={keyTermForm.watch('moq')}
-            onChange={(val) => keyTermForm.setValue('moq', val)}
-          />
-          <Input
-            label='Tipe Harga'
-            placeholder='Contoh: Fixed'
-            {...keyTermForm.register('price_type')}
-          />
-          <Input
-            label='Durasi'
-            placeholder='Contoh: 6 Bulan'
-            {...keyTermForm.register('duration')}
-          />
-          <div className='col-span-1 md:col-span-2'>
-            <Input
-              label='Tipe Penagihan (Billing Type)'
-              placeholder='Contoh: Monthly'
-              {...keyTermForm.register('billing_type')}
-            />
-          </div>
-        </form>
-      </Modal>
-
-      {/* ALERT DIALOG DELETE GLOBAL */}
+      {/* ALERT DIALOG DELETE */}
       <AlertDialog
-        open={!!deletingRecord}
-        onOpenChange={(open) => !open && setDeletingRecord(null)}
+        open={!!deletingId}
+        onOpenChange={(open) => !open && setDeletingId(null)}
       >
         <AlertDialogContent className='bg-card border-border'>
           <AlertDialogHeader>
@@ -886,8 +1002,7 @@ export default function KontrakPenawaranPage() {
               <AlertCircle className='h-5 w-5' /> Konfirmasi Penghapusan
             </AlertDialogTitle>
             <AlertDialogDescription className='text-muted-foreground'>
-              Apakah Anda yakin ingin menghapus data ini? Tindakan ini tidak
-              dapat dibatalkan.
+              Apakah Anda yakin ingin menghapus data dokumen kontrak ini?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
