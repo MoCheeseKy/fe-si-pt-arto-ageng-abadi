@@ -101,7 +101,7 @@ export default function RoleAccessPage() {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
 
   const roleForm = useForm<RoleFormValues>({
-    resolver: zodResolver(roleSchema),
+    resolver: zodResolver(roleSchema as any),
     defaultValues: { name: '' },
   });
 

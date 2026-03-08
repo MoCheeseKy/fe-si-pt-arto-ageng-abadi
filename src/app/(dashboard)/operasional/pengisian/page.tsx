@@ -68,10 +68,11 @@ const localPurchaseSchema = z.object({
 
 type LocalPurchaseFormValues = z.infer<typeof localPurchaseSchema>;
 
-export interface PurchaseRow extends Purchase {
-  supplier_name?: string;
-  driver_name?: string;
-}
+export type PurchaseRow = Omit<Purchase, 'supplier_name'> &
+  Partial<LocalPurchaseFormValues> & {
+    supplier_name?: string;
+    driver_name?: string;
+  };
 
 const columnHelper = createColumnHelper<PurchaseRow>();
 
@@ -124,7 +125,7 @@ export default function PengisianPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalPurchaseFormValues>({
-    resolver: zodResolver(localPurchaseSchema),
+    resolver: zodResolver(localPurchaseSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       do_number: '',
@@ -426,7 +427,7 @@ export default function PengisianPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -559,7 +560,7 @@ export default function PengisianPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada riwayat pengisian gas.'

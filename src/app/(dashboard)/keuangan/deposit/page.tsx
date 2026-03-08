@@ -107,7 +107,7 @@ export default function DepositPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalDepositFormValues>({
-    resolver: zodResolver(localDepositSchema),
+    resolver: zodResolver(localDepositSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       customer_id: '',
@@ -351,7 +351,7 @@ export default function DepositPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -482,7 +482,7 @@ export default function DepositPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data deposit uang muka.'

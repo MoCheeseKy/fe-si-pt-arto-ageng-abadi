@@ -87,7 +87,7 @@ export default function MasterSupplierPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<SupplierFormValues>({
-    resolver: zodResolver(supplierSchema),
+    resolver: zodResolver(supplierSchema as any),
     defaultValues: {
       company_name: '',
       address: '',
@@ -193,10 +193,10 @@ export default function MasterSupplierPage() {
       setEditingId(supplier.id);
       form.reset({
         company_name: supplier.company_name,
-        address: supplier.address,
-        phone_number: supplier.phone_number,
-        pic_name: supplier.pic_name,
-        pic_phone_number: supplier.pic_phone_number,
+        address: supplier.address || undefined,
+        phone_number: supplier.phone_number || undefined,
+        pic_name: supplier.pic_name || undefined,
+        pic_phone_number: supplier.pic_phone_number || undefined,
       });
     } else {
       setEditingId(null);
@@ -323,7 +323,7 @@ export default function MasterSupplierPage() {
           </div>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -487,7 +487,7 @@ export default function MasterSupplierPage() {
 
         {/* DATATABLE */}
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data supplier yang ditemukan.'

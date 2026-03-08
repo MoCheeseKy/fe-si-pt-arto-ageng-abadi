@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { createColumnHelper } from '@tanstack/react-table';
+import { createColumnHelper, ColumnDef } from '@tanstack/react-table';
 import {
   Plus,
   FileSignature,
@@ -129,7 +129,7 @@ export default function KontrakPenawaranPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<ContractFormValues>({
-    resolver: zodResolver(contractSchema),
+    resolver: zodResolver(contractSchema as any),
     defaultValues: { customer_id: '' },
   });
 
@@ -341,7 +341,7 @@ export default function KontrakPenawaranPage() {
 
   // --- Dynamic Table Columns ---
   const getColumns = () => {
-    const baseCols = [
+    const baseCols: ColumnDef<any, any>[] = [
       columnHelper.accessor('customer_name', {
         header: () => (
           <Button
@@ -442,7 +442,7 @@ export default function KontrakPenawaranPage() {
     }
 
     baseCols.push(
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (

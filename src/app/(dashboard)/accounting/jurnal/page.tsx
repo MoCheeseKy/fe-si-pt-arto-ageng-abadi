@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Trash2,
   Info,
+  Check,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -145,7 +146,7 @@ export default function JurnalUmumPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalJournalFormValues>({
-    resolver: zodResolver(localJournalSchema),
+    resolver: zodResolver(localJournalSchema as any),
     defaultValues: {
       transaction_date: new Date().toISOString().split('T')[0],
       description: '',
@@ -414,7 +415,7 @@ export default function JurnalUmumPage() {
           </Badge>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -546,7 +547,7 @@ export default function JurnalUmumPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data Jurnal Umum yang diposting.'

@@ -119,7 +119,7 @@ export default function CoaPage() {
   const [isSavingCategory, setIsSavingCategory] = useState(false);
 
   const form = useForm<LocalCoaFormValues>({
-    resolver: zodResolver(localCoaSchema),
+    resolver: zodResolver(localCoaSchema as any),
     defaultValues: {
       code: '',
       name: '',
@@ -232,9 +232,12 @@ export default function CoaPage() {
 
     setIsSavingCategory(true);
     try {
-      const res = await api.post('/v1/coa-categories', {
-        name: newCategoryName,
-      });
+      const res = await api.post<{ id: string; name: string }>(
+        '/v1/coa-categories',
+        {
+          name: newCategoryName,
+        },
+      );
       toast.success('Kategori baru berhasil ditambahkan.');
       setNewCategoryName('');
       setIsCategoryModalOpen(false);
@@ -385,7 +388,7 @@ export default function CoaPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -512,7 +515,7 @@ export default function CoaPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data Chart of Accounts.'

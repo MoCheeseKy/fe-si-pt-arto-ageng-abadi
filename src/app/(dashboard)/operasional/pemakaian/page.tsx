@@ -142,7 +142,7 @@ export default function PemakaianGasPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<UsageFormValues>({
-    resolver: zodResolver(usageSchema),
+    resolver: zodResolver(usageSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       currency: 'IDR',
@@ -379,7 +379,7 @@ export default function PemakaianGasPage() {
 
   // --- Dynamic Table Columns ---
   const getColumns = () => {
-    const baseCols = [
+    const baseCols: any[] = [
       columnHelper.accessor('date', {
         header: () => (
           <Button
@@ -485,7 +485,7 @@ export default function PemakaianGasPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (

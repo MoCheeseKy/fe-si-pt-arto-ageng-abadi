@@ -90,7 +90,7 @@ export default function MasterKaryawanPage() {
 
   // 2. Gunakan schema lokal di sini, bukan schema bawaan dari types/master
   const form = useForm<LocalEmployeeFormValues>({
-    resolver: zodResolver(localEmployeeSchema),
+    resolver: zodResolver(localEmployeeSchema as any),
     defaultValues: { name: '', nik: '' },
   });
 
@@ -256,7 +256,7 @@ export default function MasterKaryawanPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -381,7 +381,7 @@ export default function MasterKaryawanPage() {
 
         {/* DATATABLE */}
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data karyawan yang ditemukan.'

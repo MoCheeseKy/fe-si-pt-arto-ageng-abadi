@@ -109,7 +109,7 @@ export default function KasbonPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalCashAdvanceFormValues>({
-    resolver: zodResolver(localCashAdvanceSchema),
+    resolver: zodResolver(localCashAdvanceSchema as any),
     defaultValues: {
       employee_id: '',
       date: new Date().toISOString().split('T')[0],
@@ -352,7 +352,7 @@ export default function KasbonPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -473,7 +473,7 @@ export default function KasbonPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data pengajuan kasbon.'

@@ -80,7 +80,7 @@ export default function MasterDriverPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<DriverFormValues>({
-    resolver: zodResolver(driverSchema),
+    resolver: zodResolver(driverSchema as any),
     defaultValues: { name: '', phone_number: '', nik: '' },
   });
 
@@ -265,7 +265,7 @@ export default function MasterDriverPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -401,7 +401,7 @@ export default function MasterDriverPage() {
 
         {/* DATATABLE */}
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data driver yang ditemukan.'

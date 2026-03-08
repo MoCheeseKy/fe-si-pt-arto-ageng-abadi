@@ -111,7 +111,7 @@ export default function InvoicePage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalInvoiceFormValues>({
-    resolver: zodResolver(localInvoiceSchema),
+    resolver: zodResolver(localInvoiceSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       invoice_number: '',
@@ -384,7 +384,7 @@ export default function InvoicePage() {
           );
         },
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -521,7 +521,7 @@ export default function InvoicePage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data invoice.'

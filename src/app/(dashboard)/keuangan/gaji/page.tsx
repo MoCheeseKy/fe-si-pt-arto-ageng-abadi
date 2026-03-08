@@ -115,7 +115,7 @@ export default function PayrollPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalPayrollFormValues>({
-    resolver: zodResolver(localPayrollSchema),
+    resolver: zodResolver(localPayrollSchema as any),
     defaultValues: {
       employee_id: '',
       period: '',
@@ -397,7 +397,7 @@ export default function PayrollPage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -527,7 +527,7 @@ export default function PayrollPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data slip gaji.'

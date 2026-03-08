@@ -88,7 +88,7 @@ export default function MasterCustomerPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<CustomerFormValues>({
-    resolver: zodResolver(customerSchema),
+    resolver: zodResolver(customerSchema as any),
     defaultValues: {
       company_name: '',
       npwp: '',
@@ -196,11 +196,10 @@ export default function MasterCustomerPage() {
       setEditingId(customer.id);
       form.reset({
         company_name: customer.company_name,
-        npwp: customer.npwp,
-        address: customer.address,
-        phone_number: customer.phone_number,
-        pic_name: customer.pic_name,
-        pic_phone_number: customer.pic_phone_number,
+        npwp: customer.npwp ?? undefined,
+        address: customer.address ?? undefined,
+        phone_number: customer.phone_number ?? undefined,
+        pic_name: customer.pic_name ?? undefined,
       });
     } else {
       setEditingId(null);
@@ -301,7 +300,7 @@ export default function MasterCustomerPage() {
         cell: (info) => (
           <span
             className='text-muted-foreground truncate max-w-[200px] inline-block'
-            title={info.getValue()}
+            title={info.getValue() || undefined}
           >
             {info.getValue() || '-'}
           </span>
@@ -344,7 +343,7 @@ export default function MasterCustomerPage() {
           </div>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -516,7 +515,7 @@ export default function MasterCustomerPage() {
 
         {/* DATATABLE */}
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data customer yang ditemukan.'

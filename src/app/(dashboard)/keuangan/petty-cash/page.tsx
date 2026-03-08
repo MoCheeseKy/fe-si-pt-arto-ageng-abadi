@@ -117,7 +117,7 @@ export default function PettyCashPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalPettyCashFormValues>({
-    resolver: zodResolver(localPettyCashSchema),
+    resolver: zodResolver(localPettyCashSchema as any),
     defaultValues: {
       customer_id: '',
       transaction_type: 'Pengeluaran',
@@ -391,7 +391,7 @@ export default function PettyCashPage() {
           );
         },
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -534,7 +534,7 @@ export default function PettyCashPage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada catatan kas kecil.'
@@ -809,7 +809,7 @@ export default function PettyCashPage() {
                   className={`h-10 px-3 rounded-md border flex items-center justify-between font-mono font-bold ${form.watch('transaction_type') === 'Pemasukan' ? 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-600 bg-amber-500/10 border-amber-500/20'}`}
                 >
                   <span>Rp</span>
-                  <span>{form.watch('total').toLocaleString('id-ID')}</span>
+                  <span>{form?.watch('total')?.toLocaleString('id-ID')}</span>
                 </div>
               </div>
             </div>

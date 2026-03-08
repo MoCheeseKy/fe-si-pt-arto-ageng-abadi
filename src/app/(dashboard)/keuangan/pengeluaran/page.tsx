@@ -114,7 +114,7 @@ export default function ExpensePage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<LocalExpenseFormValues>({
-    resolver: zodResolver(localExpenseSchema),
+    resolver: zodResolver(localExpenseSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       customer_id: '',
@@ -390,7 +390,7 @@ export default function ExpensePage() {
           </span>
         ),
       }),
-      columnHelper.display({
+      columnHelper?.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -528,7 +528,7 @@ export default function ExpensePage() {
         </div>
 
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data pengeluaran yang dicatat.'
@@ -793,7 +793,7 @@ export default function ExpensePage() {
                 Total Pengeluaran
               </span>
               <span className='text-lg font-mono font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-lg border border-destructive/20'>
-                Rp {form.watch('total').toLocaleString('id-ID')}
+                Rp {form?.watch('total')?.toLocaleString('id-ID')}
               </span>
             </div>
           </div>
