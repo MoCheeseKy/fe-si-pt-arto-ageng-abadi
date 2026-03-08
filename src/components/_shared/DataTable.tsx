@@ -37,7 +37,7 @@ export function DataTable<TData, TValue>({
   });
 
   return (
-    <div className='w-full bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
+    <div className='w-full bg-card border border-border  shadow-soft-depth overflow-hidden'>
       <div className='overflow-x-auto custom-scrollbar'>
         <table className='w-full text-sm text-left border-collapse'>
           <thead className='bg-muted/50 border-b border-border'>
@@ -104,37 +104,6 @@ export function DataTable<TData, TValue>({
             )}
           </tbody>
         </table>
-      </div>
-
-      {/* Pagination Container */}
-      <div className='px-5 py-3 border-t border-border flex items-center justify-between bg-muted/10'>
-        <div className='text-xs text-muted-foreground font-medium'>
-          Halaman{' '}
-          <strong className='text-foreground mx-1'>
-            {table.getState().pagination.pageIndex + 1}
-          </strong>{' '}
-          dari {table.getPageCount() || 1}
-        </div>
-        <div className='space-x-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-            className='h-8 text-xs font-semibold bg-background'
-          >
-            Sebelumnya
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-            className='h-8 text-xs font-semibold bg-background'
-          >
-            Selanjutnya
-          </Button>
-        </div>
       </div>
     </div>
   );

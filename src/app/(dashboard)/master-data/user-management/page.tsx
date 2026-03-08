@@ -83,7 +83,7 @@ export default function UserManagementPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<UserFormValues>({
-    resolver: zodResolver(userFormSchema),
+    resolver: zodResolver(userFormSchema as any),
     defaultValues: {
       fullname: '',
       email: '',

@@ -1,27 +1,34 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
   Factory,
-  RefreshCcw,
   AlertCircle,
+  RefreshCcw,
   ArrowUpDown,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
 import { api } from '@/lib/api';
+import { Supplier, supplierSchema, SupplierFormValues } from '@/types/master';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/form/Input';
-import { SearchInput } from '@/components/form/SearchInput';
 import { DataTable } from '@/components/_shared/DataTable';
 import { Modal } from '@/components/_shared/Modal';
 import { TableActions } from '@/components/_shared/TableActions';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,52 +40,54 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-/**
- * Skema validasi form Supplier menggunakan Zod.
- * Disesuaikan dengan CreateSupplierDto dari backend.
- */
-const supplierSchema = z.object({
-  company_name: z
-    .string()
-    .min(3, { message: 'Nama Perusahaan minimal 3 karakter' }),
-  address: z.string().optional(),
-  phone_number: z.string().optional(),
-  pic_name: z.string().optional(),
-  pic_phone_number: z.string().optional(),
-});
-
-type SupplierFormValues = z.infer<typeof supplierSchema>;
-
-export interface Supplier extends SupplierFormValues {
-  id: string;
-  status: 'Aktif' | 'Nonaktif';
-}
-
 const columnHelper = createColumnHelper<Supplier>();
 
-/**
- * Halaman manajemen master data Supplier.
- * Menampilkan tabel data supplier dengan fitur filter, sort, dan pagination.
- * Terintegrasi dengan endpoint CRUD /v1/suppliers.
- *
- * @returns {JSX.Element} Komponen UI halaman Supplier
- */
-export default function SupplierPage() {
+interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  total: number;
+}
+
+export default function MasterSupplierPage() {
   const [data, setData] = useState<Supplier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [globalFilter, setGlobalFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Semua');
+  // --- Server-Side States ---
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [sort, setSort] = useState<{ id: string; desc: boolean } | null>({
+    id: 'createdAt',
+    desc: true,
+  });
+  const [meta, setMeta] = useState<PaginationMeta>({
+    page: 1,
+    pageSize: 10,
+    pageCount: 0,
+    total: 0,
+  });
 
+  // Filter States
+  const emptyFilters = {
+    company_name: '',
+    address: '',
+    phone_number: '',
+    pic_name: '',
+    pic_phone_number: '',
+  };
+  const [filterInput, setFilterInput] = useState(emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // Modal & Actions States
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<SupplierFormValues>({
-    resolver: zodResolver(supplierSchema as any),
+    resolver: zodResolver(supplierSchema),
     defaultValues: {
       company_name: '',
       address: '',
@@ -88,52 +97,106 @@ export default function SupplierPage() {
     },
   });
 
+  const activeFilterCount = useMemo(() => {
+    return Object.values(appliedFilters).filter((val) => val !== '').length;
+  }, [appliedFilters]);
+
   /**
-   * Mengambil data supplier dari backend.
-   * DTO backend tidak memiliki field status, sehingga disuntikkan default "Aktif" untuk kebutuhan filter UI.
-   *
-   * @returns {Promise<void>}
+   * Fetch data dengan parameter Server-Side (Pagination, Sorting, Filtering)
    */
-  const fetchSuppliers = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.get<any>('/v1/suppliers');
-      const fetchedData = Array.isArray(res.data)
-        ? res.data
-        : res.data?.rows || [];
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('pageSize', pageSize.toString());
 
-      const mappedData: Supplier[] = fetchedData.map((item: any) => ({
-        ...item,
-        status: item.status || 'Aktif',
-      }));
+      if (sort) {
+        params.append(
+          'order',
+          JSON.stringify([[sort.id, sort.desc ? 'DESC' : 'ASC']]),
+        );
+      }
 
-      setData(mappedData);
+      if (appliedFilters.company_name)
+        params.append('company_name', appliedFilters.company_name);
+      if (appliedFilters.address)
+        params.append('address', appliedFilters.address);
+      if (appliedFilters.phone_number)
+        params.append('phone_number', appliedFilters.phone_number);
+      if (appliedFilters.pic_name)
+        params.append('pic_name', appliedFilters.pic_name);
+      if (appliedFilters.pic_phone_number)
+        params.append('pic_phone_number', appliedFilters.pic_phone_number);
+
+      const res = await api.get<any>(`/v1/suppliers?${params.toString()}`);
+
+      const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+      setData(list);
+
+      if (res.meta?.pagination) {
+        const pagination = res.meta.pagination;
+        setMeta({
+          ...pagination,
+          pageCount: Math.ceil(pagination.total / pagination.pageSize),
+        });
+      } else {
+        setMeta({
+          total: list.length,
+          pageCount: Math.ceil(list.length / pageSize) || 1,
+          page: 1,
+          pageSize,
+        });
+      }
     } catch (err: any) {
-      setError(err.message || 'Gagal memuat data supplier dari server.');
-      toast.error('Gagal memuat data');
+      setError(err.message || 'Gagal memuat data dari server.');
+      toast.error('Gagal memuat data supplier');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page, pageSize, sort, appliedFilters]);
 
   useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+    fetchData();
+  }, [fetchData]);
 
   /**
-   * Membuka modal form untuk mode tambah atau edit.
-   * * @param {Supplier} [supplier] - Data supplier jika dalam mode edit, kosong jika tambah baru
+   * Handle Server-Side Sorting Trigger
    */
+  const handleSort = (columnId: string) => {
+    setSort((prev) => {
+      if (prev?.id === columnId) {
+        if (prev.desc) return null; // Reset sort
+        return { id: columnId, desc: true };
+      }
+      return { id: columnId, desc: false }; // Default to ASC when clicked
+    });
+    setPage(1); // Reset ke halaman 1 saat sort berubah
+  };
+
+  const applyFilters = () => {
+    setAppliedFilters(filterInput);
+    setPage(1);
+    setIsFilterOpen(false);
+  };
+
+  const resetFilters = () => {
+    setFilterInput(emptyFilters);
+    setAppliedFilters(emptyFilters);
+    setPage(1);
+    setIsFilterOpen(false);
+  };
+
   const handleOpenDialog = (supplier?: Supplier) => {
     if (supplier) {
       setEditingId(supplier.id);
       form.reset({
         company_name: supplier.company_name,
-        address: supplier.address || '',
-        phone_number: supplier.phone_number || '',
-        pic_name: supplier.pic_name || '',
-        pic_phone_number: supplier.pic_phone_number || '',
+        address: supplier.address,
+        phone_number: supplier.phone_number,
+        pic_name: supplier.pic_name,
+        pic_phone_number: supplier.pic_phone_number,
       });
     } else {
       setEditingId(null);
@@ -148,11 +211,6 @@ export default function SupplierPage() {
     setIsDialogOpen(true);
   };
 
-  /**
-   * Menangani proses submit form (Create atau Update).
-   * Memanggil PUT jika editingId tersedia, POST jika tidak.
-   * * @param {SupplierFormValues} values - Payload dari react-hook-form
-   */
   const onSubmit = async (values: SupplierFormValues) => {
     try {
       if (editingId) {
@@ -163,22 +221,19 @@ export default function SupplierPage() {
         toast.success('Supplier baru berhasil ditambahkan.');
       }
       setIsDialogOpen(false);
-      fetchSuppliers();
+      fetchData();
     } catch (err: any) {
       toast.error(err.message || 'Terjadi kesalahan saat menyimpan data.');
     }
   };
 
-  /**
-   * Menghapus data supplier berdasarkan ID yang tersimpan di state deletingId.
-   */
   const handleDelete = async () => {
     if (!deletingId) return;
     setIsDeleting(true);
     try {
       await api.delete(`/v1/suppliers/${deletingId}`);
-      toast.success('Supplier berhasil dihapus.');
-      fetchSuppliers();
+      toast.success('Data supplier berhasil dihapus.');
+      fetchData();
     } catch (err: any) {
       toast.error(err.message || 'Gagal menghapus data.');
     } finally {
@@ -187,66 +242,85 @@ export default function SupplierPage() {
     }
   };
 
-  const filteredData = useMemo(() => {
-    if (statusFilter === 'Semua') return data;
-    return data.filter((item) => item.status === statusFilter);
-  }, [data, statusFilter]);
+  // UI Sort Icon Indicator
+  const SortIcon = ({ columnId }: { columnId: string }) => (
+    <ArrowUpDown
+      className={`ml-2 h-3 w-3 ${sort?.id === columnId ? 'text-primary' : 'text-muted-foreground/50'}`}
+    />
+  );
 
   const columns = useMemo(
     () => [
       columnHelper.accessor('company_name', {
-        header: ({ column }) => (
+        header: () => (
           <Button
             variant='ghost'
             className='p-0 h-auto font-bold uppercase hover:bg-transparent'
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            onClick={() => handleSort('company_name')}
           >
-            Nama Perusahaan (Supplier) <ArrowUpDown className='ml-2 h-3 w-3' />
+            Nama Supplier <SortIcon columnId='company_name' />
           </Button>
         ),
         cell: (info) => (
-          <div className='flex items-center gap-2'>
-            <Factory className='w-4 h-4 text-muted-foreground' />
-            <span className='font-semibold text-foreground'>
-              {info.getValue()}
-            </span>
-          </div>
+          <span className='font-semibold text-foreground'>
+            {info.getValue()}
+          </span>
         ),
       }),
-      columnHelper.accessor('pic_name', {
-        header: ({ column }) => (
+      columnHelper.accessor('address', {
+        header: () => (
           <Button
             variant='ghost'
             className='p-0 h-auto font-bold uppercase hover:bg-transparent'
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            onClick={() => handleSort('address')}
           >
-            PIC & Kontak <ArrowUpDown className='ml-2 h-3 w-3' />
+            Alamat <SortIcon columnId='address' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span
+            className='text-muted-foreground truncate max-w-[200px] inline-block'
+            title={info.getValue() || ''}
+          >
+            {info.getValue() || '-'}
+          </span>
+        ),
+      }),
+      columnHelper.accessor('phone_number', {
+        header: () => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => handleSort('phone_number')}
+          >
+            No. Telepon <SortIcon columnId='phone_number' />
+          </Button>
+        ),
+        cell: (info) => (
+          <span className='font-mono text-muted-foreground'>
+            {info.getValue() || '-'}
+          </span>
+        ),
+      }),
+      columnHelper.accessor('pic_name', {
+        header: () => (
+          <Button
+            variant='ghost'
+            className='p-0 h-auto font-bold uppercase hover:bg-transparent'
+            onClick={() => handleSort('pic_name')}
+          >
+            PIC <SortIcon columnId='pic_name' />
           </Button>
         ),
         cell: (info) => (
           <div className='flex flex-col'>
-            <span className='text-sm font-medium text-foreground'>
+            <span className='font-medium text-foreground'>
               {info.getValue() || '-'}
             </span>
-            <span className='text-xs text-muted-foreground font-mono'>
+            <span className='text-xs text-muted-foreground'>
               {info.row.original.pic_phone_number || '-'}
             </span>
           </div>
-        ),
-      }),
-      columnHelper.accessor('status', {
-        header: 'Status',
-        cell: (info) => (
-          <Badge
-            variant={info.getValue() === 'Aktif' ? 'default' : 'secondary'}
-            className={
-              info.getValue() === 'Aktif'
-                ? 'bg-emerald-500 hover:bg-emerald-600'
-                : ''
-            }
-          >
-            {info.getValue()}
-          </Badge>
         ),
       }),
       columnHelper.display({
@@ -260,18 +334,18 @@ export default function SupplierPage() {
         ),
       }),
     ],
-    [],
+    [sort],
   );
 
   return (
     <div className='space-y-6 animate-in fade-in duration-500'>
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
-          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight'>
-            Master Supplier
+          <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
+            <Factory className='w-6 h-6 text-primary' /> Master Supplier
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
-            Kelola data pemasok gas CNG (Mother Station) dan kontak PIC.
+            Kelola data vendor dan penyedia Mother Station Gas CNG.
           </p>
         </div>
         <Button
@@ -291,7 +365,7 @@ export default function SupplierPage() {
           <Button
             variant='outline'
             size='sm'
-            onClick={fetchSuppliers}
+            onClick={fetchData}
             className='border-destructive/30 text-destructive hover:bg-destructive/10'
           >
             <RefreshCcw className='h-4 w-4 mr-2' /> Coba Lagi
@@ -299,44 +373,200 @@ export default function SupplierPage() {
         </div>
       )}
 
-      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden'>
-        <div className='p-4 border-b border-border flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/20'>
-          <SearchInput
-            value={globalFilter ?? ''}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            placeholder='Cari nama, alamat, atau PIC...'
-            className='w-full sm:max-w-sm'
-          />
-
-          <div className='flex items-center gap-2 w-full sm:w-auto'>
-            <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider'>
-              Status:
-            </span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className='flex h-9 w-full sm:w-32 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-primary'
-            >
-              <option value='Semua'>Semua</option>
-              <option value='Aktif'>Aktif</option>
-              <option value='Nonaktif'>Nonaktif</option>
-            </select>
+      <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
+        {/* ACTION BAR */}
+        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
+          <div className='text-sm font-medium text-muted-foreground'>
+            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+            Suppliers
           </div>
+
+          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant='outline'
+                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
+              >
+                <Filter className='w-4 h-4 text-muted-foreground' />
+                Filter Data
+                {activeFilterCount > 0 && (
+                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
+                    {activeFilterCount}
+                  </span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className='w-80 p-4 rounded-xl border-border shadow-lg'
+              align='end'
+            >
+              <div className='space-y-4'>
+                <div>
+                  <h4 className='font-heading font-bold text-sm text-foreground'>
+                    Filter Spesifik
+                  </h4>
+                  <p className='text-xs text-muted-foreground'>
+                    Isi parameter pencarian di bawah ini.
+                  </p>
+                </div>
+
+                <div className='space-y-3 max-h-[50vh] overflow-y-auto pr-2 pb-2'>
+                  <Input
+                    label='Nama Supplier'
+                    placeholder='Ketik nama...'
+                    value={filterInput.company_name}
+                    onChange={(e) =>
+                      setFilterInput({
+                        ...filterInput,
+                        company_name: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label='Alamat Supplier'
+                    placeholder='Ketik alamat...'
+                    value={filterInput.address}
+                    onChange={(e) =>
+                      setFilterInput({
+                        ...filterInput,
+                        address: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label='No. Telepon Kantor'
+                    placeholder='Ketik no. telp...'
+                    value={filterInput.phone_number}
+                    onChange={(e) =>
+                      setFilterInput({
+                        ...filterInput,
+                        phone_number: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label='Nama PIC'
+                    placeholder='Ketik nama PIC...'
+                    value={filterInput.pic_name}
+                    onChange={(e) =>
+                      setFilterInput({
+                        ...filterInput,
+                        pic_name: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label='No. Telepon PIC'
+                    placeholder='Ketik no. telp PIC...'
+                    value={filterInput.pic_phone_number}
+                    onChange={(e) =>
+                      setFilterInput({
+                        ...filterInput,
+                        pic_phone_number: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
+                  <Button variant='ghost' size='sm' onClick={resetFilters}>
+                    Reset
+                  </Button>
+                  <Button
+                    size='sm'
+                    onClick={applyFilters}
+                    className='bg-primary text-white'
+                  >
+                    Terapkan Filter
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
+        {/* DATATABLE */}
         <DataTable
-          columns={columns as any}
-          data={filteredData}
+          columns={columns}
+          data={data}
           isLoading={isLoading}
           emptyMessage='Tidak ada data supplier yang ditemukan.'
         />
+
+        {/* CUSTOM PAGINATION FOOTER */}
+        {!isLoading && meta.total > 0 && (
+          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
+            <div className='text-sm text-muted-foreground'>
+              Menampilkan{' '}
+              <span className='font-semibold text-foreground'>
+                {(page - 1) * pageSize + 1}
+              </span>{' '}
+              -{' '}
+              <span className='font-semibold text-foreground'>
+                {Math.min(page * pageSize, meta.total)}
+              </span>{' '}
+              dari{' '}
+              <span className='font-semibold text-foreground'>
+                {meta.total}
+              </span>{' '}
+              data
+            </div>
+
+            <div className='flex items-center gap-4'>
+              <div className='flex items-center gap-2'>
+                <span className='text-xs text-muted-foreground'>
+                  Baris per halaman:
+                </span>
+                <select
+                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {[5, 10, 20, 50].map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className='flex items-center gap-1'>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-8 w-8'
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                >
+                  <ChevronLeft className='h-4 w-4' />
+                </Button>
+                <div className='flex items-center justify-center w-12 text-sm font-medium'>
+                  {page} / {meta.pageCount || 1}
+                </div>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-8 w-8'
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={page >= (meta.pageCount || 1)}
+                >
+                  <ChevronRight className='h-4 w-4' />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* MODAL FORM SUPPLIER */}
       <Modal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
         title={editingId ? 'Edit Data Supplier' : 'Tambah Supplier Baru'}
-        size='lg'
+        size='md'
         footer={
           <div className='flex justify-end gap-3 w-full'>
             <Button
@@ -360,53 +590,45 @@ export default function SupplierPage() {
         <form
           id='supplier-form'
           onSubmit={form.handleSubmit(onSubmit)}
-          className='grid grid-cols-1 md:grid-cols-2 gap-5 py-2'
+          className='space-y-4 py-2'
         >
-          <div className='col-span-1 md:col-span-2'>
-            <Input
-              label='Nama Perusahaan Pemasok'
-              required
-              placeholder='PT. Pertamina Gas...'
-              error={form.formState.errors.company_name?.message}
-              {...form.register('company_name')}
-            />
-          </div>
           <Input
-            label='No. Telepon Kantor'
-            placeholder='021-XXXXXXX'
+            label='Nama Supplier'
+            required
+            placeholder='PT. Pemasok Gas'
+            error={form.formState.errors.company_name?.message}
+            {...form.register('company_name')}
+          />
+          <Input
+            label='Alamat Lengkap'
+            placeholder='Jl. Raya Industri No. 45'
+            error={form.formState.errors.address?.message}
+            {...form.register('address')}
+          />
+          <Input
+            label='Nomor Telepon Kantor'
+            placeholder='021-xxxxxxx'
             error={form.formState.errors.phone_number?.message}
             {...form.register('phone_number')}
           />
-          <div className='col-span-1 md:col-span-2'>
+          <div className='grid grid-cols-2 gap-4 pt-2 border-t border-border/50'>
             <Input
-              label='Alamat Lengkap / Lokasi Mother Station'
-              placeholder='Jl. Raya Industri...'
-              error={form.formState.errors.address?.message}
-              {...form.register('address')}
+              label='Nama PIC'
+              placeholder='Nama Narahubung'
+              error={form.formState.errors.pic_name?.message}
+              {...form.register('pic_name')}
             />
-          </div>
-          <div className='border-t border-border/50 pt-4 mt-2 col-span-1 md:col-span-2'>
-            <h4 className='text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4'>
-              Informasi Penanggung Jawab (PIC)
-            </h4>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
-              <Input
-                label='Nama PIC'
-                placeholder='Budi Santoso'
-                error={form.formState.errors.pic_name?.message}
-                {...form.register('pic_name')}
-              />
-              <Input
-                label='No. HP PIC'
-                placeholder='08XXXXXXXXXX'
-                error={form.formState.errors.pic_phone_number?.message}
-                {...form.register('pic_phone_number')}
-              />
-            </div>
+            <Input
+              label='No. Telepon PIC'
+              placeholder='08xxxxxxxxxx'
+              error={form.formState.errors.pic_phone_number?.message}
+              {...form.register('pic_phone_number')}
+            />
           </div>
         </form>
       </Modal>
 
+      {/* ALERT DIALOG DELETE */}
       <AlertDialog
         open={!!deletingId}
         onOpenChange={(open) => !open && setDeletingId(null)}
