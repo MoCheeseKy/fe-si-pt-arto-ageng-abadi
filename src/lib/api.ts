@@ -1,13 +1,20 @@
+// src/lib/api.ts
 import { GenericResponse } from '@/types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
-// Helper untuk mengambil token dari cookie di sisi Client
-function getAuthTokenFromCookie(): string | null {
+// Helper untuk mengambil token dari Zustand (localStorage) di sisi Client
+function getAuthTokenFromStore(): string | null {
   if (typeof window === 'undefined') return null;
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; auth_token=`);
-  if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+  try {
+    const storageData = localStorage.getItem('auth-storage');
+    if (storageData) {
+      const parsed = JSON.parse(storageData);
+      return parsed.state?.user?.token || null;
+    }
+  } catch (error) {
+    console.error('Gagal membaca token dari storage', error);
+  }
   return null;
 }
 
@@ -19,8 +26,8 @@ async function fetchAPI<T>(
     'Content-Type': 'application/json',
   };
 
-  // 1. Ambil token dan set sebagai Authorization header jika ada
-  const token = getAuthTokenFromCookie();
+  // 1. Ambil token dari store dan set sebagai Authorization header
+  const token = getAuthTokenFromStore();
   if (token) {
     (defaultHeaders as Record<string, string>)['Authorization'] =
       `Bearer ${token}`;
@@ -37,15 +44,18 @@ async function fetchAPI<T>(
   // 2. Handle Unauthorized (401)
   if (response.status === 401) {
     if (typeof window !== 'undefined') {
-      // Clear cookie di sisi client & redirect ke login
-      document.cookie =
-        'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict';
-      window.location.href = '/login';
+      // Clear token dari Client Store agar request selanjutnya tidak membawa token invalid
+      localStorage.removeItem('auth-storage');
+
+      // Panggil route handler Next.js untuk menghapus httpOnly cookie secara server-side
+      fetch('/api/auth/signout', { method: 'POST' }).finally(() => {
+        window.location.href = '/login';
+      });
     }
     throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
   }
 
-  // Handle respons 204 No Content (biasanya untuk DELETE)
+  // Handle respons 204 No Content
   if (response.status === 204) {
     return { statusCode: 204, message: 'Success', data: {} as T };
   }

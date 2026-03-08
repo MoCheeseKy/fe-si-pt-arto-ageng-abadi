@@ -7,6 +7,7 @@ interface UserData {
   email: string;
   RoleId: string;
   uid: string;
+  token?: string; // Tambahkan ini agar bisa menampung token dari route handler
 }
 
 interface AuthState {
@@ -23,7 +24,7 @@ export const useAuthStore = create<AuthState>()(
       clearUser: () => set({ user: null }),
     }),
     {
-      name: 'auth-storage', // Nama key di localStorage
+      name: 'auth-storage',
     },
   ),
 );
