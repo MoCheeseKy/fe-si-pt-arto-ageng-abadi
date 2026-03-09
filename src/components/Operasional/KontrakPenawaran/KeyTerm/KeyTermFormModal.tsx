@@ -17,7 +17,7 @@ export function KeyTermFormModal({
   customers,
 }: any) {
   const form = useForm<KeyTermFormValues>({
-    resolver: zodResolver(keyTermSchema),
+    resolver: zodResolver(keyTermSchema) as any,
     defaultValues: {
       customer_id: '',
       offer_date: new Date().toISOString().split('T')[0],

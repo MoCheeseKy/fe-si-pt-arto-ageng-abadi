@@ -17,7 +17,7 @@ export function OfferFormModal({
   customers,
 }: any) {
   const form = useForm<OfferFormValues>({
-    resolver: zodResolver(offerSchema),
+    resolver: zodResolver(offerSchema) as any,
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],

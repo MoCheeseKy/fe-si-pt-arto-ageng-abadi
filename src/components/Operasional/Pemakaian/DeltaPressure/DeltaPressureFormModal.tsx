@@ -17,7 +17,7 @@ export function DeltaPressureFormModal({
   customers,
 }: any) {
   const form = useForm<DeltaPressureFormValues>({
-    resolver: zodResolver(deltaPressureSchema),
+    resolver: zodResolver(deltaPressureSchema) as any,
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],
