@@ -43,7 +43,8 @@ export function Select({
       )}
       <ShadcnSelect value={value} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger
-          className={`bg-background ${error ? 'border-destructive focus:ring-destructive' : 'focus:ring-primary'}`}
+          // TAMBAHKAN w-full DISINI AGAR SELECT TIDAK KECIL
+          className={`w-full bg-background ${error ? 'border-destructive focus:ring-destructive' : 'focus:ring-primary'}`}
         >
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>

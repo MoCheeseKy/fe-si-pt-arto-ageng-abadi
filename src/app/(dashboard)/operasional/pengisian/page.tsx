@@ -1,3 +1,4 @@
+// src/app/(dashboard)/operasional/pengisian/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -10,30 +11,15 @@ import {
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { z } from 'zod';
 
 import { api } from '@/lib/api';
-import { Purchase } from '@/types/operasional';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/form/Input';
-import { NumberInput } from '@/components/form/NumberInput';
-import { Select } from '@/components/form/Select';
-import { DatePicker } from '@/components/form/DatePicker';
-import { DataTable } from '@/components/_shared/DataTable';
-import { Modal } from '@/components/_shared/Modal';
+import { DataTable, PaginationMeta } from '@/components/_shared/DataTable';
 import { TableActions } from '@/components/_shared/TableActions';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { SearchInput } from '@/components/form/SearchInput';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,43 +31,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-// 1. Schema lokal yang disesuaikan persis dengan ekspektasi Backend
-const localPurchaseSchema = z.object({
-  date: z.string().min(1, 'Tanggal wajib diisi'),
-  supplier_id: z.string().min(1, 'Supplier wajib dipilih'),
-  driver_id: z.string().min(1, 'Driver wajib dipilih'),
-  license_plate: z.string().min(1, 'Plat nomor wajib diisi'),
-  gtm_type: z.string().min(1, 'Tipe GTM wajib diisi'),
-  do_number: z.string().min(1, 'Nomor DO wajib diisi'),
-  ghc: z.coerce.number().min(0),
-  pressure_start: z.coerce.number().min(0),
-  pressure_finish: z.coerce.number().min(0),
-  meter_start: z.coerce.number().min(0),
-  meter_finish: z.coerce.number().min(0),
-  volume_mmscf: z.coerce.number().min(0),
-  volume_mmbtu: z.coerce.number().min(0),
-  currency: z.string().min(1),
-  exchange_rate: z.coerce.number().min(1),
-  price_per_sm3: z.coerce.number().min(0),
-  total_sales: z.coerce.number().min(0),
-});
-
-type LocalPurchaseFormValues = z.infer<typeof localPurchaseSchema>;
-
-export type PurchaseRow = Omit<Purchase, 'supplier_name'> &
-  Partial<LocalPurchaseFormValues> & {
-    supplier_name?: string;
-    driver_name?: string;
-  };
+// Import Komponen Pecahan
+import {
+  localPurchaseSchema,
+  LocalPurchaseFormValues,
+  PurchaseRow,
+} from '@/components/Operasional/Pengisian/schema';
+import {
+  PengisianFilter,
+  PengisianFilterState,
+} from '@/components/Operasional/Pengisian/PengisianFilter';
+import { PengisianDetailModal } from '@/components/Operasional/Pengisian/PengisianDetailModal';
+import { PengisianFormModal } from '@/components/Operasional/Pengisian/PengisianFormModal';
 
 const columnHelper = createColumnHelper<PurchaseRow>();
-
-interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  total: number;
-}
 
 export default function PengisianPage() {
   const [data, setData] = useState<PurchaseRow[]>([]);
@@ -109,15 +72,21 @@ export default function PengisianPage() {
     total: 0,
   });
 
-  // Filter States
-  const emptyFilters = { do_number: '', license_plate: '' };
-  const [filterInput, setFilterInput] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  // Main Search State (DO Number)
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Filter States (By Date)
+  const emptyFilters: PengisianFilterState = { start_date: '', end_date: '' };
+  const [filterInput, setFilterInput] =
+    useState<PengisianFilterState>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] =
+    useState<PengisianFilterState>(emptyFilters);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Modal & Actions States
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDetailOpen, setIsDetailOpen] = useState(false); // State untuk Modal Detail
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedData, setSelectedData] = useState<PurchaseRow | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -147,6 +116,15 @@ export default function PengisianPage() {
     },
   });
 
+  // Debouncing DO Search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const activeFilterCount = useMemo(() => {
     return Object.values(appliedFilters).filter((val) => val !== '').length;
   }, [appliedFilters]);
@@ -166,12 +144,16 @@ export default function PengisianPage() {
         );
       }
 
-      if (appliedFilters.do_number)
-        params.append('do_number', appliedFilters.do_number);
-      if (appliedFilters.license_plate)
-        params.append('license_plate', appliedFilters.license_plate);
+      if (debouncedSearch) {
+        params.append('do_number', debouncedSearch);
+      }
+      if (appliedFilters.start_date) {
+        params.append('startDate', appliedFilters.start_date);
+      }
+      if (appliedFilters.end_date) {
+        params.append('endDate', appliedFilters.end_date);
+      }
 
-      // Fetch Purchases, Suppliers, dan Drivers secara bersamaan
       const [purchaseRes, supplierRes, driverRes] = await Promise.all([
         api.get<any>(`/v1/purchases?${params.toString()}`),
         api.get<any>('/v1/suppliers?pageSize=1000'),
@@ -222,7 +204,7 @@ export default function PengisianPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, sort, appliedFilters]);
+  }, [page, pageSize, sort, appliedFilters, debouncedSearch]);
 
   useEffect(() => {
     fetchData();
@@ -230,11 +212,8 @@ export default function PengisianPage() {
 
   const handleSort = (columnId: string) => {
     setSort((prev) => {
-      if (prev?.id === columnId) {
-        if (prev.desc) return null;
-        return { id: columnId, desc: true };
-      }
-      return { id: columnId, desc: false };
+      if (prev?.id === columnId) return { id: columnId, desc: !prev.desc };
+      return { id: columnId, desc: true };
     });
     setPage(1);
   };
@@ -252,7 +231,6 @@ export default function PengisianPage() {
     setIsFilterOpen(false);
   };
 
-  // --- Handlers for Modals ---
   const handleOpenDetail = (purchase: PurchaseRow) => {
     setSelectedData(purchase);
     setIsDetailOpen(true);
@@ -344,7 +322,6 @@ export default function PengisianPage() {
     />
   );
 
-  // --- Kolom Tabel (Hanya Data Esensial) ---
   const columns = useMemo(
     () => [
       columnHelper.accessor('date', {
@@ -357,14 +334,13 @@ export default function PengisianPage() {
             Tanggal <SortIcon columnId='date' />
           </Button>
         ),
-        cell: (info) => {
-          const val = info.getValue();
-          return (
-            <span className='font-medium text-foreground'>
-              {val ? format(new Date(val), 'dd MMM yyyy') : '-'}
-            </span>
-          );
-        },
+        cell: (info) => (
+          <span className='font-medium text-foreground'>
+            {info.getValue()
+              ? format(new Date(info.getValue()), 'dd MMM yyyy')
+              : '-'}
+          </span>
+        ),
       }),
       columnHelper.accessor('do_number', {
         header: () => (
@@ -432,7 +408,7 @@ export default function PengisianPage() {
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
           <TableActions
-            onView={() => handleOpenDetail(info.row.original)} // Tambahkan fungsi onView di sini
+            onView={() => handleOpenDetail(info.row.original)}
             onEdit={() => handleOpenDialog(info.row.original)}
             onDelete={() => setDeletingId(info.row.original.id!)}
           />
@@ -481,509 +457,70 @@ export default function PengisianPage() {
       )}
 
       <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
-        {/* ACTION BAR */}
-        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
-          <div className='text-sm font-medium text-muted-foreground'>
-            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
-            Transaksi Pengisian
+        <div className='p-4 border-b border-border flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-muted/20'>
+          {/* BAGIAN KIRI: Info Total & Search */}
+          <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto'>
+            <div className='text-sm font-medium text-muted-foreground whitespace-nowrap hidden xl:block'>
+              Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+              Transaksi
+            </div>
+
+            <SearchInput
+              placeholder='Cari Nomor DO...'
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className='w-full sm:w-64'
+            />
           </div>
 
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant='outline'
-                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
-              >
-                <Filter className='w-4 h-4 text-muted-foreground' />
-                Filter Data
-                {activeFilterCount > 0 && (
-                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className='w-80 p-4 rounded-xl border-border shadow-lg'
-              align='end'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <h4 className='font-heading font-bold text-sm text-foreground'>
-                    Filter Spesifik
-                  </h4>
-                  <p className='text-xs text-muted-foreground'>
-                    Pencarian data pengisian.
-                  </p>
-                </div>
-
-                <div className='space-y-3'>
-                  <Input
-                    label='Nomor DO (Delivery Order)'
-                    placeholder='Ketik No DO...'
-                    value={filterInput.do_number}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        do_number: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='Plat Nomor Kendaraan'
-                    placeholder='Ketik Plat Nomor...'
-                    value={filterInput.license_plate}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        license_plate: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
-                  <Button variant='ghost' size='sm' onClick={resetFilters}>
-                    Reset
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={applyFilters}
-                    className='bg-primary text-white'
-                  >
-                    Terapkan Filter
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          {/* BAGIAN KANAN: Advanced Filter By Date */}
+          <div className='flex w-full lg:w-auto justify-end'>
+            <PengisianFilter
+              filterInput={filterInput}
+              setFilterInput={setFilterInput}
+              activeFilterCount={activeFilterCount}
+              isFilterOpen={isFilterOpen}
+              setIsFilterOpen={setIsFilterOpen}
+              applyFilters={applyFilters}
+              resetFilters={resetFilters}
+            />
+          </div>
         </div>
 
         <DataTable
           columns={columns as any}
           data={data}
           isLoading={isLoading}
-          emptyMessage='Belum ada riwayat pengisian gas.'
+          emptyMessage={
+            debouncedSearch || activeFilterCount > 0
+              ? 'Tidak ada data pengisian yang cocok dengan pencarian/filter.'
+              : 'Belum ada riwayat pengisian gas.'
+          }
+          meta={meta}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
         />
-
-        {/* CUSTOM PAGINATION FOOTER */}
-        {!isLoading && meta.total > 0 && (
-          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
-            <div className='text-sm text-muted-foreground'>
-              Menampilkan{' '}
-              <span className='font-semibold text-foreground'>
-                {(page - 1) * pageSize + 1}
-              </span>{' '}
-              -{' '}
-              <span className='font-semibold text-foreground'>
-                {Math.min(page * pageSize, meta.total)}
-              </span>{' '}
-              dari{' '}
-              <span className='font-semibold text-foreground'>
-                {meta.total}
-              </span>{' '}
-              data
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <span className='text-xs text-muted-foreground'>
-                  Baris per halaman:
-                </span>
-                <select
-                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {[5, 10, 20, 50].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className='flex items-center gap-1'>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className='h-4 w-4' />
-                </Button>
-                <div className='flex items-center justify-center w-12 text-sm font-medium'>
-                  {page} / {meta.pageCount || 1}
-                </div>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= (meta.pageCount || 1)}
-                >
-                  <ChevronRight className='h-4 w-4' />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MODAL VIEW DETAIL */}
-      <Modal
+      <PengisianDetailModal
         isOpen={isDetailOpen}
         onClose={() => setIsDetailOpen(false)}
-        title='Detail Transaksi Pengisian'
-        size='md'
-        footer={
-          <div className='flex justify-end w-full'>
-            <Button variant='outline' onClick={() => setIsDetailOpen(false)}>
-              Tutup
-            </Button>
-          </div>
-        }
-      >
-        {selectedData && (
-          <div className='space-y-6 py-2'>
-            <div className='flex items-center gap-3 pb-4 border-b border-border/50'>
-              <div className='h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center text-primary'>
-                <FileText className='h-5 w-5' />
-              </div>
-              <div>
-                <p className='text-sm text-muted-foreground'>
-                  Nomor Delivery Order
-                </p>
-                <p className='text-lg font-bold font-mono text-foreground'>
-                  {selectedData.do_number || '-'}
-                </p>
-              </div>
-            </div>
+        selectedData={selectedData}
+      />
 
-            {/* Informasi Umum */}
-            <div>
-              <h4 className='text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3'>
-                Informasi Umum
-              </h4>
-              <div className='grid grid-cols-2 gap-y-4 gap-x-6 bg-muted/20 p-4 rounded-lg border border-border/50'>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Tanggal</p>
-                  <p className='font-medium text-sm'>
-                    {selectedData.date
-                      ? format(new Date(selectedData.date), 'dd MMM yyyy')
-                      : '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>
-                    Supplier (Mother Station)
-                  </p>
-                  <p className='font-medium text-sm'>
-                    {selectedData.supplier_name}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Nama Driver</p>
-                  <p className='font-medium text-sm'>
-                    {selectedData.driver_name}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>
-                    Tipe GTM / Kendaraan
-                  </p>
-                  <p className='font-medium text-sm'>
-                    {selectedData.gtm_type || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Plat Nomor</p>
-                  <p className='font-medium text-sm font-mono'>
-                    {selectedData.license_plate || '-'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Data Teknis Pengukuran */}
-            <div>
-              <h4 className='text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3'>
-                Pengukuran Operasional
-              </h4>
-              <div className='grid grid-cols-2 sm:grid-cols-3 gap-y-4 gap-x-6 bg-primary/5 p-4 rounded-lg border border-primary/10'>
-                <div>
-                  <p className='text-xs text-muted-foreground'>GHC</p>
-                  <p className='font-semibold text-sm font-mono'>
-                    {selectedData.ghc || 0}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Volume MMSCF</p>
-                  <p className='font-semibold text-sm font-mono text-primary'>
-                    {selectedData.volume_mmscf || 0}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Volume MMBTU</p>
-                  <p className='font-semibold text-sm font-mono text-primary'>
-                    {selectedData.volume_mmbtu || 0}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Pressure Awal</p>
-                  <p className='font-semibold text-sm font-mono'>
-                    {selectedData.pressure_start || 0}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>
-                    Pressure Akhir
-                  </p>
-                  <p className='font-semibold text-sm font-mono'>
-                    {selectedData.pressure_finish || 0}
-                  </p>
-                </div>
-                <div className='hidden sm:block'></div> {/* Spacer */}
-                <div>
-                  <p className='text-xs text-muted-foreground'>Meter Awal</p>
-                  <p className='font-semibold text-sm font-mono'>
-                    {selectedData.meter_start || 0}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs text-muted-foreground'>Meter Akhir</p>
-                  <p className='font-semibold text-sm font-mono'>
-                    {selectedData.meter_finish || 0}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Data Finansial */}
-            <div>
-              <h4 className='text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3'>
-                Informasi Finansial
-              </h4>
-              <div className='flex flex-col gap-3 bg-muted/20 p-4 rounded-lg border border-border/50'>
-                <div className='flex justify-between items-center'>
-                  <span className='text-sm text-muted-foreground'>
-                    Mata Uang & Kurs
-                  </span>
-                  <span className='text-sm font-medium'>
-                    {selectedData.currency || 'IDR'} (Rate:{' '}
-                    {selectedData.exchange_rate || 1})
-                  </span>
-                </div>
-                <div className='flex justify-between items-center'>
-                  <span className='text-sm text-muted-foreground'>
-                    Harga per SM3
-                  </span>
-                  <span className='text-sm font-mono font-medium'>
-                    Rp{' '}
-                    {(selectedData.price_per_sm3 || 0).toLocaleString('id-ID')}
-                  </span>
-                </div>
-                <div className='flex justify-between items-center pt-3 border-t border-border/50 mt-1'>
-                  <span className='text-sm font-bold text-foreground'>
-                    Total Tagihan (Sales)
-                  </span>
-                  <span className='text-lg font-bold font-mono text-emerald-600'>
-                    Rp {(selectedData.total_sales || 0).toLocaleString('id-ID')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* MODAL FORM PENGISIAN (CREATE / EDIT) */}
-      <Modal
+      <PengisianFormModal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title={editingId ? 'Edit Transaksi Pengisian' : 'Catat Pengisian Baru'}
-        size='xl'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsDialogOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='purchase-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={form.formState.isSubmitting}
-            >
-              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='purchase-form'
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-6 py-2'
-        >
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
-            <DatePicker
-              label='Tanggal Pengisian'
-              required
-              value={form.watch('date')}
-              onChange={(val) => form.setValue('date', val)}
-              error={form.formState.errors.date?.message}
-            />
-            <Input
-              label='Nomor DO (Delivery Order)'
-              required
-              placeholder='Contoh: DO-2025-001'
-              error={form.formState.errors.do_number?.message}
-              {...form.register('do_number')}
-            />
-          </div>
+        form={form}
+        onSubmit={onSubmit}
+        isEditing={!!editingId}
+        suppliers={suppliers}
+        drivers={drivers}
+      />
 
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
-            <Select
-              label='Pilih Supplier (Mother Station)'
-              required
-              options={suppliers}
-              value={form.watch('supplier_id')}
-              onChange={(val) => form.setValue('supplier_id', val)}
-              error={form.formState.errors.supplier_id?.message}
-            />
-            <Select
-              label='Pilih Driver'
-              required
-              options={drivers}
-              value={form.watch('driver_id')}
-              onChange={(val) => form.setValue('driver_id', val)}
-              error={form.formState.errors.driver_id?.message}
-            />
-          </div>
-
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
-            <Input
-              label='Plat Nomor GTM'
-              required
-              placeholder='Contoh: B 1234 CD'
-              error={form.formState.errors.license_plate?.message}
-              {...form.register('license_plate')}
-            />
-            <Input
-              label='Tipe GTM'
-              required
-              placeholder='Contoh: Type A'
-              error={form.formState.errors.gtm_type?.message}
-              {...form.register('gtm_type')}
-            />
-          </div>
-
-          <div className='bg-muted/30 p-4 rounded-xl border border-border/60 space-y-4'>
-            <h3 className='text-sm font-bold uppercase text-primary tracking-wider mb-2'>
-              Data Pengukuran (Teknis)
-            </h3>
-            <div className='grid grid-cols-2 md:grid-cols-5 gap-4'>
-              <NumberInput
-                label='GHC'
-                required
-                value={form.watch('ghc')}
-                onChange={(val) => form.setValue('ghc', val)}
-                error={form.formState.errors.ghc?.message}
-              />
-              <NumberInput
-                label='Pressure Start'
-                required
-                value={form.watch('pressure_start')}
-                onChange={(val) => form.setValue('pressure_start', val)}
-                error={form.formState.errors.pressure_start?.message}
-              />
-              <NumberInput
-                label='Pressure Finish'
-                required
-                value={form.watch('pressure_finish')}
-                onChange={(val) => form.setValue('pressure_finish', val)}
-                error={form.formState.errors.pressure_finish?.message}
-              />
-              <NumberInput
-                label='Meter Start'
-                required
-                value={form.watch('meter_start')}
-                onChange={(val) => form.setValue('meter_start', val)}
-                error={form.formState.errors.meter_start?.message}
-              />
-              <NumberInput
-                label='Meter Finish'
-                required
-                value={form.watch('meter_finish')}
-                onChange={(val) => form.setValue('meter_finish', val)}
-                error={form.formState.errors.meter_finish?.message}
-              />
-            </div>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-4 pt-2'>
-              <NumberInput
-                label='Volume (MMSCF)'
-                required
-                value={form.watch('volume_mmscf')}
-                onChange={(val) => form.setValue('volume_mmscf', val)}
-                error={form.formState.errors.volume_mmscf?.message}
-              />
-              <NumberInput
-                label='Volume (MMBTU)'
-                required
-                value={form.watch('volume_mmbtu')}
-                onChange={(val) => form.setValue('volume_mmbtu', val)}
-                error={form.formState.errors.volume_mmbtu?.message}
-              />
-            </div>
-          </div>
-
-          <div className='bg-primary/5 p-4 rounded-xl border border-primary/20 space-y-4'>
-            <h3 className='text-sm font-bold uppercase text-primary tracking-wider mb-2'>
-              Data Finansial
-            </h3>
-            <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-              <Select
-                label='Mata Uang'
-                options={[
-                  { label: 'IDR', value: 'IDR' },
-                  { label: 'USD', value: 'USD' },
-                ]}
-                value={form.watch('currency')}
-                onChange={(val) => form.setValue('currency', val)}
-              />
-              <NumberInput
-                label='Kurs (Exchange Rate)'
-                required
-                value={form.watch('exchange_rate')}
-                onChange={(val) => form.setValue('exchange_rate', val)}
-              />
-              <NumberInput
-                label='Harga per SM3'
-                required
-                value={form.watch('price_per_sm3')}
-                onChange={(val) => form.setValue('price_per_sm3', val)}
-                error={form.formState.errors.price_per_sm3?.message}
-              />
-              <NumberInput
-                label='Total Penjualan'
-                required
-                value={form.watch('total_sales')}
-                onChange={(val) => form.setValue('total_sales', val)}
-                error={form.formState.errors.total_sales?.message}
-              />
-            </div>
-          </div>
-        </form>
-      </Modal>
-
-      {/* ALERT DIALOG DELETE */}
       <AlertDialog
         open={!!deletingId}
         onOpenChange={(open) => !open && setDeletingId(null)}

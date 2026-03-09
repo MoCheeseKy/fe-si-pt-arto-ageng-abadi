@@ -32,12 +32,17 @@ export function DatePicker({
   const date = value ? new Date(value) : undefined;
 
   const handleSelect = (selectedDate: Date | undefined) => {
-    if (onChange && selectedDate) {
-      // Mengubah date object menjadi YYYY-MM-DD
-      const offsetDate = new Date(
-        selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000,
-      );
-      onChange(offsetDate.toISOString().split('T')[0]);
+    if (onChange) {
+      if (selectedDate) {
+        // Mengubah date object menjadi YYYY-MM-DD
+        const offsetDate = new Date(
+          selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000,
+        );
+        onChange(offsetDate.toISOString().split('T')[0]);
+      } else {
+        // Handle ketika user membatalkan pilihan (Clear date)
+        onChange('');
+      }
     }
   };
 
