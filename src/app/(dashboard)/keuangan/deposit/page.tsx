@@ -371,7 +371,7 @@ export default function DepositPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <Wallet className='w-6 h-6 text-primary' /> Master Deposit
+            <Wallet className='w-6 h-6 text-primary' /> Deposit
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Pencatatan uang muka atau saldo deposit dari pelanggan (Customer).

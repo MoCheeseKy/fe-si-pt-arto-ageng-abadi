@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Coins,
   UserCircle,
-  PieChart,
+  BarChart3,
   FileSpreadsheet,
   Banknote,
   FileSignature,
@@ -27,6 +27,8 @@ import {
   Landmark,
   Calculator,
   Settings,
+  Droplets,
+  Container,
 } from 'lucide-react';
 
 import {
@@ -59,7 +61,7 @@ const navItems = [
     icon: Database,
     items: [
       { title: 'Customer', url: '/master-data/customer', icon: Users },
-      { title: 'Supplier', url: '/master-data/supplier', icon: Factory },
+      { title: 'Supplier', url: '/master-data/supplier', icon: Container },
       { title: 'Driver', url: '/master-data/driver', icon: Truck },
       { title: 'Karyawan', url: '/master-data/karyawan', icon: UserCircle },
     ],
@@ -68,12 +70,12 @@ const navItems = [
     group: 'Operasional',
     icon: Briefcase,
     items: [
-      { title: 'Pengisian Gas', url: '/operasional/pengisian', icon: Truck },
+      { title: 'Pengisian Gas', url: '/operasional/pengisian', icon: Droplets },
       { title: 'Pemakaian Gas', url: '/operasional/pemakaian', icon: Factory },
       {
         title: 'Kontrak & Penawaran',
         url: '/operasional/kontrak-penawaran',
-        icon: FileText,
+        icon: FileSignature,
       },
     ],
   },
@@ -86,7 +88,7 @@ const navItems = [
       { title: 'Pengeluaran', url: '/keuangan/pengeluaran', icon: CreditCard },
       { title: 'Petty Cash', url: '/keuangan/petty-cash', icon: Coins },
       { title: 'Kasbon', url: '/keuangan/kasbon', icon: Banknote },
-      { title: 'Payroll (Gaji)', url: '/keuangan/gaji', icon: FileSignature },
+      { title: 'Payroll (Gaji)', url: '/keuangan/gaji', icon: FileText },
     ],
   },
   {
@@ -95,7 +97,11 @@ const navItems = [
     items: [
       { title: 'Buku Besar', url: '/accounting/coa', icon: BookOpen },
       { title: 'Jurnal Umum', url: '/accounting/jurnal', icon: FileText },
-      { title: 'Laporan Keuangan', url: '/accounting/laporan', icon: PieChart },
+      {
+        title: 'Laporan Keuangan',
+        url: '/accounting/laporan',
+        icon: BarChart3,
+      },
       { title: 'Reporting Excel', url: '/reporting', icon: FileSpreadsheet },
     ],
   },

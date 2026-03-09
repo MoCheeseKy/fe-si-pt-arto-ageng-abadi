@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  Building2,
+  Users,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
@@ -49,7 +49,7 @@ interface PaginationMeta {
   total: number;
 }
 
-export default function MasterCustomerPage() {
+export default function CustomerPage() {
   const [data, setData] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -362,7 +362,7 @@ export default function MasterCustomerPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <Building2 className='w-6 h-6 text-primary' /> Master Customer
+            <Users className='w-6 h-6 text-primary' /> Customer
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Kelola data pelanggan B2B dan informasi PIC perusahaan.

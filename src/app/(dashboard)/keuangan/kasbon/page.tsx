@@ -372,7 +372,7 @@ export default function KasbonPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <Banknote className='w-6 h-6 text-primary' /> Master Kasbon
+            <Banknote className='w-6 h-6 text-primary' /> Kasbon
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Pencatatan pinjaman (Cash Advance) karyawan dan rincian potongan

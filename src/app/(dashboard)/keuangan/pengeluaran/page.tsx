@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  Receipt,
+  CreditCard,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
@@ -417,7 +417,8 @@ export default function ExpensePage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <Receipt className='w-6 h-6 text-primary' /> Pengeluaran (Expenses)
+            <CreditCard className='w-6 h-6 text-primary' /> Pengeluaran
+            (Expenses)
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Pencatatan biaya pengeluaran operasional yang ditautkan ke Customer.
@@ -620,7 +621,7 @@ export default function ExpensePage() {
           <div className='space-y-6 py-2'>
             <div className='flex flex-col gap-1 pb-4 border-b border-border/50 text-center'>
               <div className='mx-auto h-12 w-12 bg-destructive/10 rounded-full flex items-center justify-center text-destructive mb-2'>
-                <Receipt className='h-6 w-6' />
+                <CreditCard className='h-6 w-6' />
               </div>
               <p className='text-sm text-muted-foreground'>Total Pengeluaran</p>
               <p className='text-2xl font-bold font-mono text-destructive'>

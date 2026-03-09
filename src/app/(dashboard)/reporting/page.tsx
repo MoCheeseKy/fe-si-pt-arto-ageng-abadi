@@ -224,17 +224,6 @@ export default function ReportingPage() {
             </div>
           </div>
 
-          <div className='p-4 bg-muted/30 border border-border rounded-xl text-sm text-muted-foreground flex items-start gap-3'>
-            <div className='mt-0.5'>
-              <FileSpreadsheet className='w-5 h-5 text-emerald-500' />
-            </div>
-            <p className='leading-relaxed'>
-              Sistem akan memanggil data mentah secara <i>live</i> dari
-              database. Data dapat diolah kembali menggunakan PivotTable di
-              Excel.
-            </p>
-          </div>
-
           <div className='pt-2 border-t border-border/50'>
             <Button
               onClick={exportToExcel}

@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  UserSquare2,
+  Truck,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
@@ -284,7 +284,7 @@ export default function MasterDriverPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <UserSquare2 className='w-6 h-6 text-primary' /> Master Driver
+            <Truck className='w-6 h-6 text-primary' /> Driver
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Kelola data pengemudi operasional untuk pengangkutan Gas CNG.

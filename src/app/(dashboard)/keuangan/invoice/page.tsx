@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Receipt,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -410,7 +411,7 @@ export default function InvoicePage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <FileText className='w-6 h-6 text-primary' /> Master Invoice
+            <Receipt className='w-6 h-6 text-primary' /> Invoice
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Pusat pengelolaan tagihan (Invoice) kepada pelanggan.

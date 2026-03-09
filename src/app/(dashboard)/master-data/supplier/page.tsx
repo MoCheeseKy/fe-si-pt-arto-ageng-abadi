@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  Factory,
+  Container,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
@@ -342,7 +342,7 @@ export default function MasterSupplierPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <Factory className='w-6 h-6 text-primary' /> Master Supplier
+            <Container className='w-6 h-6 text-primary' /> Supplier
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Kelola data vendor dan penyedia Mother Station Gas CNG.

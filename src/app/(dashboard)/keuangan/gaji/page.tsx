@@ -6,14 +6,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
-  CreditCard,
+  FileText,
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
   Filter,
   ChevronLeft,
   ChevronRight,
-  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -417,8 +416,7 @@ export default function PayrollPage() {
       <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
         <div>
           <h2 className='text-2xl font-heading font-bold text-foreground tracking-tight flex items-center gap-2'>
-            <CreditCard className='w-6 h-6 text-primary' /> Master Payroll
-            (Gaji)
+            <FileText className='w-6 h-6 text-primary' /> Payroll (Gaji)
           </h2>
           <p className='text-sm text-muted-foreground mt-1'>
             Pusat pencatatan gaji bulanan, rincian pendapatan, dan pemotongan
