@@ -1,3 +1,4 @@
+// src/app/(dashboard)/master-data/supplier/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -10,25 +11,15 @@ import {
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 
 import { api } from '@/lib/api';
 import { Supplier, supplierSchema, SupplierFormValues } from '@/types/master';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/form/Input';
-import { DataTable } from '@/components/_shared/DataTable';
-import { Modal } from '@/components/_shared/Modal';
+import { DataTable, PaginationMeta } from '@/components/_shared/DataTable';
 import { TableActions } from '@/components/_shared/TableActions';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { SearchInput } from '@/components/form/SearchInput';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,15 +31,19 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+import {
+  SupplierFilter,
+  SupplierFilterState,
+} from '@/components/MasterData/Supplier/SupplierFilter';
+import { SupplierFormModal } from '@/components/MasterData/Supplier/SupplierFormModal';
+
 const columnHelper = createColumnHelper<Supplier>();
 
-interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  total: number;
-}
-
+/**
+ * Controller Component untuk halaman Master Supplier.
+ * Mengelola logic Fetching Data, Debounced Global Search, Sorting,
+ * Pagination, dan dispatching aksi CRUD (Create, Update, Delete) ke API.
+ */
 export default function MasterSupplierPage() {
   const [data, setData] = useState<Supplier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,16 +63,21 @@ export default function MasterSupplierPage() {
     total: 0,
   });
 
-  // Filter States
-  const emptyFilters = {
-    company_name: '',
+  // Main Search State
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Secondary Filter States
+  const emptyFilters: SupplierFilterState = {
     address: '',
     phone_number: '',
     pic_name: '',
     pic_phone_number: '',
   };
-  const [filterInput, setFilterInput] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  const [filterInput, setFilterInput] =
+    useState<SupplierFilterState>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] =
+    useState<SupplierFilterState>(emptyFilters);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Modal & Actions States
@@ -86,6 +86,7 @@ export default function MasterSupplierPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // React Hook Form
   const form = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema as any),
     defaultValues: {
@@ -97,12 +98,20 @@ export default function MasterSupplierPage() {
     },
   });
 
+  /** Debouncing main search input untuk mencegah spam ke API server */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const activeFilterCount = useMemo(() => {
     return Object.values(appliedFilters).filter((val) => val !== '').length;
   }, [appliedFilters]);
 
-  /**
-   * Fetch data dengan parameter Server-Side (Pagination, Sorting, Filtering)
+  /** * Fetch data ke backend menggunakan payload search & filter aktif.
    */
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -119,19 +128,15 @@ export default function MasterSupplierPage() {
         );
       }
 
-      if (appliedFilters.company_name)
-        params.append('company_name', appliedFilters.company_name);
-      if (appliedFilters.address)
-        params.append('address', appliedFilters.address);
-      if (appliedFilters.phone_number)
-        params.append('phone_number', appliedFilters.phone_number);
-      if (appliedFilters.pic_name)
-        params.append('pic_name', appliedFilters.pic_name);
-      if (appliedFilters.pic_phone_number)
-        params.append('pic_phone_number', appliedFilters.pic_phone_number);
+      if (debouncedSearch) {
+        params.append('company_name', debouncedSearch);
+      }
+
+      Object.entries(appliedFilters).forEach(([key, value]) => {
+        if (value) params.append(key, value);
+      });
 
       const res = await api.get<any>(`/v1/suppliers?${params.toString()}`);
-
       const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
       setData(list);
 
@@ -155,26 +160,25 @@ export default function MasterSupplierPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, sort, appliedFilters]);
+  }, [page, pageSize, sort, appliedFilters, debouncedSearch]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  /**
-   * Handle Server-Side Sorting Trigger
-   */
+  /** Men-toggle state sorting (ASC, DESC, atau null) */
   const handleSort = (columnId: string) => {
     setSort((prev) => {
       if (prev?.id === columnId) {
-        if (prev.desc) return null; // Reset sort
+        if (prev.desc) return null;
         return { id: columnId, desc: true };
       }
-      return { id: columnId, desc: false }; // Default to ASC when clicked
+      return { id: columnId, desc: false };
     });
-    setPage(1); // Reset ke halaman 1 saat sort berubah
+    setPage(1);
   };
 
+  /** Sinkronisasi input form filter sekunder dan memicu API Fetching */
   const applyFilters = () => {
     setAppliedFilters(filterInput);
     setPage(1);
@@ -188,6 +192,7 @@ export default function MasterSupplierPage() {
     setIsFilterOpen(false);
   };
 
+  /** Membuka Modal Form dan menginjeksikan initialValues saat Edit Mode */
   const handleOpenDialog = (supplier?: Supplier) => {
     if (supplier) {
       setEditingId(supplier.id);
@@ -211,6 +216,7 @@ export default function MasterSupplierPage() {
     setIsDialogOpen(true);
   };
 
+  /** Memanggil API Create/Update dari data validasi React Hook Form */
   const onSubmit = async (values: SupplierFormValues) => {
     try {
       if (editingId) {
@@ -227,6 +233,7 @@ export default function MasterSupplierPage() {
     }
   };
 
+  /** Mengeksekusi API Delete Data */
   const handleDelete = async () => {
     if (!deletingId) return;
     setIsDeleting(true);
@@ -242,7 +249,6 @@ export default function MasterSupplierPage() {
     }
   };
 
-  // UI Sort Icon Indicator
   const SortIcon = ({ columnId }: { columnId: string }) => (
     <ArrowUpDown
       className={`ml-2 h-3 w-3 ${sort?.id === columnId ? 'text-primary' : 'text-muted-foreground/50'}`}
@@ -374,261 +380,60 @@ export default function MasterSupplierPage() {
       )}
 
       <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
-        {/* ACTION BAR */}
-        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
-          <div className='text-sm font-medium text-muted-foreground'>
-            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
-            Suppliers
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-muted/20'>
+          {/* BAGIAN KIRI: Info Total & Search Bar */}
+          <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto'>
+            <SearchInput
+              placeholder='Cari nama supplier...'
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className='w-full sm:w-64'
+            />
+
+            <div className='text-sm font-medium text-muted-foreground whitespace-nowrap hidden lg:block'>
+              Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+              Suppliers
+            </div>
           </div>
 
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant='outline'
-                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
-              >
-                <Filter className='w-4 h-4 text-muted-foreground' />
-                Filter Data
-                {activeFilterCount > 0 && (
-                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className='w-80 p-4 rounded-xl border-border shadow-lg'
-              align='end'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <h4 className='font-heading font-bold text-sm text-foreground'>
-                    Filter Spesifik
-                  </h4>
-                  <p className='text-xs text-muted-foreground'>
-                    Isi parameter pencarian di bawah ini.
-                  </p>
-                </div>
-
-                <div className='space-y-3 max-h-[50vh] overflow-y-auto pr-2 pb-2'>
-                  <Input
-                    label='Nama Supplier'
-                    placeholder='Ketik nama...'
-                    value={filterInput.company_name}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        company_name: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='Alamat Supplier'
-                    placeholder='Ketik alamat...'
-                    value={filterInput.address}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        address: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='No. Telepon Kantor'
-                    placeholder='Ketik no. telp...'
-                    value={filterInput.phone_number}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        phone_number: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='Nama PIC'
-                    placeholder='Ketik nama PIC...'
-                    value={filterInput.pic_name}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        pic_name: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='No. Telepon PIC'
-                    placeholder='Ketik no. telp PIC...'
-                    value={filterInput.pic_phone_number}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        pic_phone_number: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
-                  <Button variant='ghost' size='sm' onClick={resetFilters}>
-                    Reset
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={applyFilters}
-                    className='bg-primary text-white'
-                  >
-                    Terapkan Filter
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          {/* BAGIAN KANAN: Advanced Filter */}
+          <SupplierFilter
+            filterInput={filterInput}
+            setFilterInput={setFilterInput}
+            activeFilterCount={activeFilterCount}
+            isFilterOpen={isFilterOpen}
+            setIsFilterOpen={setIsFilterOpen}
+            applyFilters={applyFilters}
+            resetFilters={resetFilters}
+          />
         </div>
 
-        {/* DATATABLE */}
         <DataTable
           columns={columns as any}
           data={data}
           isLoading={isLoading}
-          emptyMessage='Tidak ada data supplier yang ditemukan.'
+          emptyMessage={
+            debouncedSearch || activeFilterCount > 0
+              ? 'Tidak ada data supplier yang cocok dengan filter.'
+              : 'Tidak ada data supplier yang ditemukan.'
+          }
+          meta={meta}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
         />
-
-        {/* CUSTOM PAGINATION FOOTER */}
-        {!isLoading && meta.total > 0 && (
-          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
-            <div className='text-sm text-muted-foreground'>
-              Menampilkan{' '}
-              <span className='font-semibold text-foreground'>
-                {(page - 1) * pageSize + 1}
-              </span>{' '}
-              -{' '}
-              <span className='font-semibold text-foreground'>
-                {Math.min(page * pageSize, meta.total)}
-              </span>{' '}
-              dari{' '}
-              <span className='font-semibold text-foreground'>
-                {meta.total}
-              </span>{' '}
-              data
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <span className='text-xs text-muted-foreground'>
-                  Baris per halaman:
-                </span>
-                <select
-                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {[5, 10, 20, 50].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className='flex items-center gap-1'>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className='h-4 w-4' />
-                </Button>
-                <div className='flex items-center justify-center w-12 text-sm font-medium'>
-                  {page} / {meta.pageCount || 1}
-                </div>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= (meta.pageCount || 1)}
-                >
-                  <ChevronRight className='h-4 w-4' />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MODAL FORM SUPPLIER */}
-      <Modal
+      <SupplierFormModal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title={editingId ? 'Edit Data Supplier' : 'Tambah Supplier Baru'}
-        size='md'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsDialogOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='supplier-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={form.formState.isSubmitting}
-            >
-              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='supplier-form'
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-4 py-2'
-        >
-          <Input
-            label='Nama Supplier'
-            required
-            placeholder='PT. Pemasok Gas'
-            error={form.formState.errors.company_name?.message}
-            {...form.register('company_name')}
-          />
-          <Input
-            label='Alamat Lengkap'
-            placeholder='Jl. Raya Industri No. 45'
-            error={form.formState.errors.address?.message}
-            {...form.register('address')}
-          />
-          <Input
-            label='Nomor Telepon Kantor'
-            placeholder='021-xxxxxxx'
-            error={form.formState.errors.phone_number?.message}
-            {...form.register('phone_number')}
-          />
-          <div className='grid grid-cols-2 gap-4 pt-2 border-t border-border/50'>
-            <Input
-              label='Nama PIC'
-              placeholder='Nama Narahubung'
-              error={form.formState.errors.pic_name?.message}
-              {...form.register('pic_name')}
-            />
-            <Input
-              label='No. Telepon PIC'
-              placeholder='08xxxxxxxxxx'
-              error={form.formState.errors.pic_phone_number?.message}
-              {...form.register('pic_phone_number')}
-            />
-          </div>
-        </form>
-      </Modal>
+        form={form}
+        onSubmit={onSubmit}
+        isEditing={!!editingId}
+      />
 
-      {/* ALERT DIALOG DELETE */}
       <AlertDialog
         open={!!deletingId}
         onOpenChange={(open) => !open && setDeletingId(null)}

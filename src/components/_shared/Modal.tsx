@@ -54,7 +54,6 @@ export function Modal({
           </DialogHeader>
         </div>
 
-        {/* Body - Dibatasi max tinggi agar bisa scroll */}
         <div className='p-6 max-h-[75vh] overflow-y-auto custom-scrollbar bg-background/50'>
           {children}
         </div>

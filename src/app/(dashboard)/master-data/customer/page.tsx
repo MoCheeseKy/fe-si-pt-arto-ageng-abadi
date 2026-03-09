@@ -1,3 +1,4 @@
+// src/app/(dashboard)/master-data/customer/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -10,25 +11,15 @@ import {
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 
 import { api } from '@/lib/api';
 import { Customer, customerSchema, CustomerFormValues } from '@/types/customer';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/form/Input';
-import { DataTable } from '@/components/_shared/DataTable';
-import { Modal } from '@/components/_shared/Modal';
+import { DataTable, PaginationMeta } from '@/components/_shared/DataTable';
 import { TableActions } from '@/components/_shared/TableActions';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { SearchInput } from '@/components/form/SearchInput';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,15 +31,18 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+import {
+  CustomerFilter,
+  CustomerFilterState,
+} from '@/components/MasterData/Customer/CustomerFilter';
+import { CustomerFormModal } from '@/components/MasterData/Customer/CustomerFormModal';
+
 const columnHelper = createColumnHelper<Customer>();
 
-interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  total: number;
-}
-
+/**
+ * Mengelola state pagination, sorting, pencarian debounced, dan interaksi CRUD (Create, Read, Update, Delete)
+ * untuk entitas Customer melalui komunikasi API `/v1/customers`.
+ */
 export default function CustomerPage() {
   const [data, setData] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,17 +62,22 @@ export default function CustomerPage() {
     total: 0,
   });
 
-  // Filter States
-  const emptyFilters = {
-    company_name: '',
+  // Main Search State (Pisah dari Filter Popover)
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Secondary Filter States
+  const emptyFilters: CustomerFilterState = {
     npwp: '',
     pic_name: '',
     address: '',
     phone_number: '',
     pic_phone_number: '',
   };
-  const [filterInput, setFilterInput] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  const [filterInput, setFilterInput] =
+    useState<CustomerFilterState>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] =
+    useState<CustomerFilterState>(emptyFilters);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Modal & Actions States
@@ -87,6 +86,7 @@ export default function CustomerPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // React Hook Form
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema as any),
     defaultValues: {
@@ -99,12 +99,25 @@ export default function CustomerPage() {
     },
   });
 
+  /**
+   * Mengatur delay 500ms setelah user berhenti mengetik pada main search.
+   * Ini mencegah terjadinya spam API call saat user sedang mengetik panjang.
+   */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+      setPage(1); // Reset ke page 1 tiap kali search berubah
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const activeFilterCount = useMemo(() => {
     return Object.values(appliedFilters).filter((val) => val !== '').length;
   }, [appliedFilters]);
 
   /**
-   * Fetch data dengan parameter Server-Side (Pagination, Sorting, Filtering)
+   * Melakukan request GET ke endpoint `/v1/customers`
+   * dengan menyertakan URLSearchParams berdasarkan state terkini.
    */
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -121,21 +134,19 @@ export default function CustomerPage() {
         );
       }
 
-      if (appliedFilters.company_name)
-        params.append('company_name', appliedFilters.company_name);
-      if (appliedFilters.npwp) params.append('npwp', appliedFilters.npwp);
-      if (appliedFilters.pic_name)
-        params.append('pic_name', appliedFilters.pic_name);
-      if (appliedFilters.address)
-        params.append('address', appliedFilters.address);
-      if (appliedFilters.phone_number)
-        params.append('phone_number', appliedFilters.phone_number);
-      if (appliedFilters.pic_phone_number)
-        params.append('pic_phone_number', appliedFilters.pic_phone_number);
+      // Append Global Search
+      if (debouncedSearch) {
+        params.append('company_name', debouncedSearch);
+      }
+
+      // Append Secondary Filters
+      Object.entries(appliedFilters).forEach(([key, value]) => {
+        if (value) params.append(key, value);
+      });
 
       const res = await api.get<any>(`/v1/customers?${params.toString()}`);
-
       const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
       setData(list);
 
       if (res.meta?.pagination) {
@@ -158,32 +169,35 @@ export default function CustomerPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, sort, appliedFilters]);
+  }, [page, pageSize, sort, appliedFilters, debouncedSearch]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   /**
-   * Handle Server-Side Sorting Trigger
+   * Mengubah orientasi sorting (ASC / DESC) atau me-reset-nya,
+   * dan mengembalikan posisi pagination ke halaman pertama.
    */
   const handleSort = (columnId: string) => {
     setSort((prev) => {
       if (prev?.id === columnId) {
-        if (prev.desc) return null; // Reset sort
+        if (prev.desc) return null;
         return { id: columnId, desc: true };
       }
-      return { id: columnId, desc: false }; // Default to ASC when clicked
+      return { id: columnId, desc: false };
     });
-    setPage(1); // Reset ke halaman 1 saat sort berubah
+    setPage(1);
   };
 
+  /** Memindahkan filter lokal ke filter aplikatif dan me-reset page */
   const applyFilters = () => {
     setAppliedFilters(filterInput);
     setPage(1);
     setIsFilterOpen(false);
   };
 
+  /** Mengosongkan secondary filter dan me-reset filter aplikatif */
   const resetFilters = () => {
     setFilterInput(emptyFilters);
     setAppliedFilters(emptyFilters);
@@ -191,6 +205,7 @@ export default function CustomerPage() {
     setIsFilterOpen(false);
   };
 
+  /** Melakukan inject initial values ke react-hook-form sebelum merender Form Modal */
   const handleOpenDialog = (customer?: Customer) => {
     if (customer) {
       setEditingId(customer.id);
@@ -200,6 +215,7 @@ export default function CustomerPage() {
         address: customer.address ?? undefined,
         phone_number: customer.phone_number ?? undefined,
         pic_name: customer.pic_name ?? undefined,
+        pic_phone_number: customer.pic_phone_number ?? undefined,
       });
     } else {
       setEditingId(null);
@@ -215,6 +231,7 @@ export default function CustomerPage() {
     setIsDialogOpen(true);
   };
 
+  /** Melakukan dispatch request POST / PUT ke backend tergantung state editingId */
   const onSubmit = async (values: CustomerFormValues) => {
     try {
       if (editingId) {
@@ -231,6 +248,7 @@ export default function CustomerPage() {
     }
   };
 
+  /** Men-trigger request DELETE berdasarkan ID yang ditampung dalam state deletingId */
   const handleDelete = async () => {
     if (!deletingId) return;
     setIsDeleting(true);
@@ -246,7 +264,6 @@ export default function CustomerPage() {
     }
   };
 
-  // UI Sort Icon Indicator
   const SortIcon = ({ columnId }: { columnId: string }) => (
     <ArrowUpDown
       className={`ml-2 h-3 w-3 ${sort?.id === columnId ? 'text-primary' : 'text-muted-foreground/50'}`}
@@ -394,278 +411,59 @@ export default function CustomerPage() {
       )}
 
       <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
-        {/* ACTION BAR */}
-        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
-          <div className='text-sm font-medium text-muted-foreground'>
-            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
-            Customers
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-muted/20'>
+          {/* BAGIAN KIRI: Info Total & Search Bar */}
+          <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto'>
+            <SearchInput
+              placeholder='Cari nama perusahaan...'
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className='w-full sm:w-64'
+            />
+
+            <div className='text-sm font-medium text-muted-foreground whitespace-nowrap hidden lg:block'>
+              Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+              Customers
+            </div>
           </div>
 
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant='outline'
-                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
-              >
-                <Filter className='w-4 h-4 text-muted-foreground' />
-                Filter Data
-                {activeFilterCount > 0 && (
-                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className='w-80 p-4 rounded-xl border-border shadow-lg'
-              align='end'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <h4 className='font-heading font-bold text-sm text-foreground'>
-                    Filter Spesifik
-                  </h4>
-                  <p className='text-xs text-muted-foreground'>
-                    Isi parameter pencarian di bawah ini.
-                  </p>
-                </div>
-
-                <div className='space-y-3 max-h-[50vh] overflow-y-auto pr-2 pb-2'>
-                  <Input
-                    label='Nama Perusahaan'
-                    placeholder='Ketik nama...'
-                    value={filterInput.company_name}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        company_name: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='Nomor NPWP'
-                    placeholder='Ketik NPWP...'
-                    value={filterInput.npwp}
-                    onChange={(e) =>
-                      setFilterInput({ ...filterInput, npwp: e.target.value })
-                    }
-                  />
-                  <Input
-                    label='Alamat Perusahaan'
-                    placeholder='Ketik alamat...'
-                    value={filterInput.address}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        address: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='No. Telepon Kantor'
-                    placeholder='Ketik no. telp...'
-                    value={filterInput.phone_number}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        phone_number: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='Nama PIC'
-                    placeholder='Ketik nama PIC...'
-                    value={filterInput.pic_name}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        pic_name: e.target.value,
-                      })
-                    }
-                  />
-                  <Input
-                    label='No. Telepon PIC'
-                    placeholder='Ketik no. telp PIC...'
-                    value={filterInput.pic_phone_number}
-                    onChange={(e) =>
-                      setFilterInput({
-                        ...filterInput,
-                        pic_phone_number: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
-                  <Button variant='ghost' size='sm' onClick={resetFilters}>
-                    Reset
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={applyFilters}
-                    className='bg-primary text-white'
-                  >
-                    Terapkan Filter
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          {/* BAGIAN KANAN: Advanced Filter */}
+          <CustomerFilter
+            filterInput={filterInput}
+            setFilterInput={setFilterInput}
+            activeFilterCount={activeFilterCount}
+            isFilterOpen={isFilterOpen}
+            setIsFilterOpen={setIsFilterOpen}
+            applyFilters={applyFilters}
+            resetFilters={resetFilters}
+          />
         </div>
 
-        {/* DATATABLE */}
         <DataTable
           columns={columns as any}
           data={data}
           isLoading={isLoading}
-          emptyMessage='Tidak ada data customer yang ditemukan.'
+          emptyMessage={
+            debouncedSearch || activeFilterCount > 0
+              ? 'Tidak ada data customer yang cocok dengan filter.'
+              : 'Tidak ada data customer yang ditemukan.'
+          }
+          meta={meta}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
         />
-
-        {/* CUSTOM PAGINATION FOOTER */}
-        {!isLoading && meta.total > 0 && (
-          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
-            <div className='text-sm text-muted-foreground'>
-              Menampilkan{' '}
-              <span className='font-semibold text-foreground'>
-                {(page - 1) * pageSize + 1}
-              </span>{' '}
-              -{' '}
-              <span className='font-semibold text-foreground'>
-                {Math.min(page * pageSize, meta.total)}
-              </span>{' '}
-              dari{' '}
-              <span className='font-semibold text-foreground'>
-                {meta.total}
-              </span>{' '}
-              data
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <span className='text-xs text-muted-foreground'>
-                  Baris per halaman:
-                </span>
-                <select
-                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {[5, 10, 20, 50].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className='flex items-center gap-1'>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className='h-4 w-4' />
-                </Button>
-                <div className='flex items-center justify-center w-12 text-sm font-medium'>
-                  {page} / {meta.pageCount || 1}
-                </div>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= (meta.pageCount || 1)}
-                >
-                  <ChevronRight className='h-4 w-4' />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MODAL FORM CUSTOMER */}
-      <Modal
+      <CustomerFormModal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title={editingId ? 'Edit Data Customer' : 'Tambah Customer Baru'}
-        size='md'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsDialogOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='customer-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={form.formState.isSubmitting}
-            >
-              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='customer-form'
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-4 py-2'
-        >
-          <Input
-            label='Nama Perusahaan'
-            required
-            placeholder='PT. Nama Perusahaan'
-            error={form.formState.errors.company_name?.message}
-            {...form.register('company_name')}
-          />
-          <Input
-            label='NPWP'
-            required
-            placeholder='00.000.000.0-000.000'
-            error={form.formState.errors.npwp?.message}
-            {...form.register('npwp')}
-          />
-          <Input
-            label='Alamat Lengkap'
-            required
-            placeholder='Jl. Raya Contoh No. 123'
-            error={form.formState.errors.address?.message}
-            {...form.register('address')}
-          />
-          <Input
-            label='Nomor Telepon Kantor'
-            required
-            placeholder='021-xxxxxxx'
-            error={form.formState.errors.phone_number?.message}
-            {...form.register('phone_number')}
-          />
-          <div className='grid grid-cols-2 gap-4 pt-2 border-t border-border/50'>
-            <Input
-              label='Nama PIC'
-              required
-              placeholder='Nama Penanggung Jawab'
-              error={form.formState.errors.pic_name?.message}
-              {...form.register('pic_name')}
-            />
-            <Input
-              label='No. Telepon PIC'
-              required
-              placeholder='08xxxxxxxxxx'
-              error={form.formState.errors.pic_phone_number?.message}
-              {...form.register('pic_phone_number')}
-            />
-          </div>
-        </form>
-      </Modal>
+        form={form}
+        onSubmit={onSubmit}
+        isEditing={!!editingId}
+      />
 
       {/* ALERT DIALOG DELETE */}
       <AlertDialog

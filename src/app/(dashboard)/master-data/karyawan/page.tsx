@@ -1,3 +1,4 @@
+// src/app/(dashboard)/master-data/karyawan/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -10,25 +11,15 @@ import {
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 
 import { api } from '@/lib/api';
 import { Employee } from '@/types/master';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/form/Input';
-import { DataTable } from '@/components/_shared/DataTable';
-import { Modal } from '@/components/_shared/Modal';
+import { DataTable, PaginationMeta } from '@/components/_shared/DataTable';
 import { TableActions } from '@/components/_shared/TableActions';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { SearchInput } from '@/components/form/SearchInput';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,23 +31,23 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+import {
+  localEmployeeSchema,
+  LocalEmployeeFormValues,
+} from '@/components/MasterData/Karyawan/schema';
+import {
+  EmployeeFilter,
+  EmployeeFilterState,
+} from '@/components/MasterData/Karyawan/EmployeeFilter';
+import { EmployeeFormModal } from '@/components/MasterData/Karyawan/EmployeeFormModal';
+
 const columnHelper = createColumnHelper<Employee>();
 
-interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  total: number;
-}
-
-// 1. Buat Schema Validasi Lokal yang HANYA mewajibkan name dan nik
-const localEmployeeSchema = z.object({
-  name: z.string().min(1, 'Nama Karyawan wajib diisi'),
-  nik: z.string().min(1, 'NIK wajib diisi'),
-});
-
-type LocalEmployeeFormValues = z.infer<typeof localEmployeeSchema>;
-
+/**
+ * Controller Component untuk halaman Master Karyawan.
+ * Mengelola logic Fetching Data, Debounced Global Search, Sorting,
+ * Pagination, dan dispatching aksi CRUD (Create, Update, Delete) ke API.
+ */
 export default function MasterKaryawanPage() {
   const [data, setData] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,10 +67,16 @@ export default function MasterKaryawanPage() {
     total: 0,
   });
 
-  // Filter States
-  const emptyFilters = { name: '', nik: '' };
-  const [filterInput, setFilterInput] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  // Main Search State
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Secondary Filter States
+  const emptyFilters: EmployeeFilterState = { nik: '' };
+  const [filterInput, setFilterInput] =
+    useState<EmployeeFilterState>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] =
+    useState<EmployeeFilterState>(emptyFilters);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Modal & Actions States
@@ -88,16 +85,26 @@ export default function MasterKaryawanPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // 2. Gunakan schema lokal di sini, bukan schema bawaan dari types/master
+  // React Hook Form (menggunakan local schema)
   const form = useForm<LocalEmployeeFormValues>({
     resolver: zodResolver(localEmployeeSchema as any),
     defaultValues: { name: '', nik: '' },
   });
 
+  /** Debouncing main search input (Nama Karyawan) untuk mencegah spam API */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const activeFilterCount = useMemo(() => {
     return Object.values(appliedFilters).filter((val) => val !== '').length;
   }, [appliedFilters]);
 
+  /** Fetch data ke backend menggunakan payload search & filter aktif */
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -113,11 +120,15 @@ export default function MasterKaryawanPage() {
         );
       }
 
-      if (appliedFilters.name) params.append('name', appliedFilters.name);
-      if (appliedFilters.nik) params.append('nik', appliedFilters.nik);
+      if (debouncedSearch) {
+        params.append('name', debouncedSearch);
+      }
+
+      if (appliedFilters.nik) {
+        params.append('nik', appliedFilters.nik);
+      }
 
       const res = await api.get<any>(`/v1/employees?${params.toString()}`);
-
       const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
       setData(list);
 
@@ -141,12 +152,13 @@ export default function MasterKaryawanPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, sort, appliedFilters]);
+  }, [page, pageSize, sort, appliedFilters, debouncedSearch]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  /** Men-toggle state sorting (ASC, DESC, atau null) */
   const handleSort = (columnId: string) => {
     setSort((prev) => {
       if (prev?.id === columnId) {
@@ -158,6 +170,7 @@ export default function MasterKaryawanPage() {
     setPage(1);
   };
 
+  /** Sinkronisasi input form filter sekunder dan memicu API Fetching */
   const applyFilters = () => {
     setAppliedFilters(filterInput);
     setPage(1);
@@ -171,6 +184,7 @@ export default function MasterKaryawanPage() {
     setIsFilterOpen(false);
   };
 
+  /** Membuka Modal Form dan menginjeksikan initialValues saat Edit Mode */
   const handleOpenDialog = (employee?: Employee) => {
     if (employee) {
       setEditingId(employee.id);
@@ -185,6 +199,7 @@ export default function MasterKaryawanPage() {
     setIsDialogOpen(true);
   };
 
+  /** Memanggil API Create/Update dari data validasi React Hook Form */
   const onSubmit = async (values: LocalEmployeeFormValues) => {
     try {
       if (editingId) {
@@ -201,6 +216,7 @@ export default function MasterKaryawanPage() {
     }
   };
 
+  /** Mengeksekusi API Delete Data */
   const handleDelete = async () => {
     if (!deletingId) return;
     setIsDeleting(true);
@@ -307,203 +323,60 @@ export default function MasterKaryawanPage() {
       )}
 
       <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
-        {/* ACTION BAR */}
-        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
-          <div className='text-sm font-medium text-muted-foreground'>
-            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
-            Employees
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-muted/20'>
+          {/* BAGIAN KIRI: Info Total & Search Bar */}
+          <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto'>
+            <SearchInput
+              placeholder='Cari nama karyawan...'
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className='w-full sm:w-64'
+            />
+
+            <div className='text-sm font-medium text-muted-foreground whitespace-nowrap hidden lg:block'>
+              Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
+              Employees
+            </div>
           </div>
 
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant='outline'
-                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
-              >
-                <Filter className='w-4 h-4 text-muted-foreground' />
-                Filter Data
-                {activeFilterCount > 0 && (
-                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className='w-80 p-4 rounded-xl border-border shadow-lg'
-              align='end'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <h4 className='font-heading font-bold text-sm text-foreground'>
-                    Filter Spesifik
-                  </h4>
-                  <p className='text-xs text-muted-foreground'>
-                    Isi parameter pencarian di bawah ini.
-                  </p>
-                </div>
-
-                <div className='space-y-3'>
-                  <Input
-                    label='Nama Karyawan'
-                    placeholder='Ketik nama...'
-                    value={filterInput.name}
-                    onChange={(e) =>
-                      setFilterInput({ ...filterInput, name: e.target.value })
-                    }
-                  />
-                  <Input
-                    label='Nomor Induk Karyawan (NIK)'
-                    placeholder='Ketik NIK...'
-                    value={filterInput.nik}
-                    onChange={(e) =>
-                      setFilterInput({ ...filterInput, nik: e.target.value })
-                    }
-                  />
-                </div>
-
-                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
-                  <Button variant='ghost' size='sm' onClick={resetFilters}>
-                    Reset
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={applyFilters}
-                    className='bg-primary text-white'
-                  >
-                    Terapkan Filter
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          {/* BAGIAN KANAN: Advanced Filter */}
+          <EmployeeFilter
+            filterInput={filterInput}
+            setFilterInput={setFilterInput}
+            activeFilterCount={activeFilterCount}
+            isFilterOpen={isFilterOpen}
+            setIsFilterOpen={setIsFilterOpen}
+            applyFilters={applyFilters}
+            resetFilters={resetFilters}
+          />
         </div>
 
-        {/* DATATABLE */}
         <DataTable
           columns={columns as any}
           data={data}
           isLoading={isLoading}
-          emptyMessage='Tidak ada data karyawan yang ditemukan.'
+          emptyMessage={
+            debouncedSearch || activeFilterCount > 0
+              ? 'Tidak ada data karyawan yang cocok dengan filter.'
+              : 'Tidak ada data karyawan yang ditemukan.'
+          }
+          meta={meta}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
         />
-
-        {/* CUSTOM PAGINATION FOOTER */}
-        {!isLoading && meta.total > 0 && (
-          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
-            <div className='text-sm text-muted-foreground'>
-              Menampilkan{' '}
-              <span className='font-semibold text-foreground'>
-                {(page - 1) * pageSize + 1}
-              </span>{' '}
-              -{' '}
-              <span className='font-semibold text-foreground'>
-                {Math.min(page * pageSize, meta.total)}
-              </span>{' '}
-              dari{' '}
-              <span className='font-semibold text-foreground'>
-                {meta.total}
-              </span>{' '}
-              data
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <span className='text-xs text-muted-foreground'>
-                  Baris per halaman:
-                </span>
-                <select
-                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {[5, 10, 20, 50].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className='flex items-center gap-1'>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className='h-4 w-4' />
-                </Button>
-                <div className='flex items-center justify-center w-12 text-sm font-medium'>
-                  {page} / {meta.pageCount || 1}
-                </div>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= (meta.pageCount || 1)}
-                >
-                  <ChevronRight className='h-4 w-4' />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MODAL FORM KARYAWAN */}
-      <Modal
+      <EmployeeFormModal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title={editingId ? 'Edit Data Karyawan' : 'Tambah Karyawan Baru'}
-        size='sm'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsDialogOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='employee-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={form.formState.isSubmitting}
-            >
-              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='employee-form'
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-4 py-2'
-        >
-          <Input
-            label='Nama Lengkap'
-            required
-            placeholder='Nama Karyawan'
-            error={form.formState.errors.name?.message}
-            {...form.register('name')}
-          />
-          <Input
-            label='Nomor Induk Karyawan (NIK)'
-            required
-            placeholder='Contoh: 12345678'
-            error={form.formState.errors.nik?.message}
-            {...form.register('nik')}
-          />
-        </form>
-      </Modal>
+        form={form}
+        onSubmit={onSubmit}
+        isEditing={!!editingId}
+      />
 
-      {/* ALERT DIALOG DELETE */}
       <AlertDialog
         open={!!deletingId}
         onOpenChange={(open) => !open && setDeletingId(null)}
