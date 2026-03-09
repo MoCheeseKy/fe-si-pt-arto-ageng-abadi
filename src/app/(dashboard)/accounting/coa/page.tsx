@@ -1,8 +1,7 @@
+// src/app/(dashboard)/accounting/coa/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { createColumnHelper } from '@tanstack/react-table';
 import {
   Plus,
@@ -10,38 +9,15 @@ import {
   AlertCircle,
   RefreshCcw,
   ArrowUpDown,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
-  Check,
-  ChevronsUpDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 
 import { api } from '@/lib/api';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/form/Input';
-import { NumberInput } from '@/components/form/NumberInput';
-import { Select } from '@/components/form/Select';
 import { DataTable } from '@/components/_shared/DataTable';
-import { Modal } from '@/components/_shared/Modal';
 import { TableActions } from '@/components/_shared/TableActions';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
+import { SearchInput } from '@/components/form/SearchInput';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,20 +29,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-// 1. FIX: Gunakan initialBalance (huruf B besar) sesuai pesan error database
-const localCoaSchema = z.object({
-  code: z.string().min(1, 'Kode Akun wajib diisi'),
-  name: z.string().min(1, 'Nama Akun wajib diisi'),
-  CoACategoryId: z.string().min(1, 'Kategori Akun wajib dipilih'),
-  initialBalance: z.coerce.number().min(0, 'Saldo awal tidak boleh negatif'),
-});
-
-type LocalCoaFormValues = z.infer<typeof localCoaSchema>;
-
-export interface CoaRow extends LocalCoaFormValues {
-  id: string;
-  category_name?: string;
-}
+// Import Komponen Pecahan
+import { CoaRow, LocalCoaFormValues } from '@/components/Accounting/Coa/schema';
+import {
+  CoaFilter,
+  CoaFilterState,
+} from '@/components/Accounting/Coa/CoaFilter';
+import { CoaFormModal } from '@/components/Accounting/Coa/CoaFormModal';
 
 const columnHelper = createColumnHelper<CoaRow>();
 
@@ -100,37 +69,33 @@ export default function CoaPage() {
     total: 0,
   });
 
-  // Filter States
-  const emptyFilters = { code: '', CoACategoryId: 'ALL' };
-  const [filterInput, setFilterInput] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
+  // Main Search State (Code Akun)
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Filter States (Category)
+  const emptyFilters: CoaFilterState = { CoACategoryId: 'ALL' };
+  const [filterInput, setFilterInput] = useState<CoaFilterState>(emptyFilters);
+  const [appliedFilters, setAppliedFilters] =
+    useState<CoaFilterState>(emptyFilters);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  // Modal CoA & Actions States
+  // Modal & Actions States
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedData, setSelectedData] = useState<CoaRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Combobox & Modal Category States
-  const [openCategoryCombobox, setOpenCategoryCombobox] = useState(false);
-  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [isSavingCategory, setIsSavingCategory] = useState(false);
-
-  const form = useForm<LocalCoaFormValues>({
-    resolver: zodResolver(localCoaSchema as any),
-    defaultValues: {
-      code: '',
-      name: '',
-      CoACategoryId: '',
-      initialBalance: 0, // FIX: Gunakan initialBalance
-    },
-  });
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (appliedFilters.code !== '') count++;
     if (appliedFilters.CoACategoryId !== 'ALL') count++;
     return count;
   }, [appliedFilters]);
@@ -163,8 +128,8 @@ export default function CoaPage() {
         );
       }
 
-      if (appliedFilters.code) {
-        params.append('code', appliedFilters.code);
+      if (debouncedSearch) {
+        params.append('code', debouncedSearch);
       }
       if (
         appliedFilters.CoACategoryId &&
@@ -174,8 +139,8 @@ export default function CoaPage() {
       }
 
       const res = await api.get<any>(`/v1/accounting-coa?${params.toString()}`);
-
       const list = Array.isArray(res.data) ? res.data : res.data?.rows || [];
+
       setData(list);
 
       if (res.meta?.pagination) {
@@ -189,22 +154,18 @@ export default function CoaPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, sort, appliedFilters]);
+  }, [page, pageSize, sort, appliedFilters, debouncedSearch]);
 
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
-
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   const handleSort = (columnId: string) => {
     setSort((prev) => {
-      if (prev?.id === columnId) {
-        if (prev.desc) return null;
-        return { id: columnId, desc: true };
-      }
+      if (prev?.id === columnId) return { id: columnId, desc: !prev.desc };
       return { id: columnId, desc: false };
     });
     setPage(1);
@@ -215,7 +176,6 @@ export default function CoaPage() {
     setPage(1);
     setIsFilterOpen(false);
   };
-
   const resetFilters = () => {
     setFilterInput(emptyFilters);
     setAppliedFilters(emptyFilters);
@@ -223,61 +183,13 @@ export default function CoaPage() {
     setIsFilterOpen(false);
   };
 
-  const handleAddCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCategoryName.trim()) {
-      toast.error('Nama kategori tidak boleh kosong.');
-      return;
-    }
-
-    setIsSavingCategory(true);
-    try {
-      const res = await api.post<{ id: string; name: string }>(
-        '/v1/coa-categories',
-        {
-          name: newCategoryName,
-        },
-      );
-      toast.success('Kategori baru berhasil ditambahkan.');
-      setNewCategoryName('');
-      setIsCategoryModalOpen(false);
-
-      await fetchCategories();
-      if (res.data?.id) {
-        form.setValue('CoACategoryId', res.data.id);
-        form.clearErrors('CoACategoryId');
-      }
-    } catch (err: any) {
-      toast.error(err.message || 'Gagal menambahkan kategori.');
-    } finally {
-      setIsSavingCategory(false);
-    }
-  };
-
   const handleOpenDialog = (coa?: CoaRow) => {
-    if (coa) {
-      setEditingId(coa.id);
-      form.reset({
-        code: coa.code,
-        name: coa.name,
-        CoACategoryId: coa.CoACategoryId || '',
-        initialBalance: coa.initialBalance || 0, // FIX: Gunakan initialBalance
-      });
-    } else {
-      setEditingId(null);
-      form.reset({
-        code: '',
-        name: '',
-        CoACategoryId: '',
-        initialBalance: 0,
-      });
-    }
+    setSelectedData(coa || null);
     setIsDialogOpen(true);
   };
 
   const onSubmit = async (values: LocalCoaFormValues) => {
     try {
-      // 🎯 FIX: Pastikan payload persis menggunakan key initialBalance (B besar)
       const payload = {
         code: values.code,
         name: values.name,
@@ -285,8 +197,8 @@ export default function CoaPage() {
         initialBalance: Number(values.initialBalance),
       };
 
-      if (editingId) {
-        await api.put(`/v1/accounting-coa/${editingId}`, payload);
+      if (selectedData?.id) {
+        await api.put(`/v1/accounting-coa/${selectedData.id}`, payload);
         toast.success('Data Akun berhasil diperbarui.');
       } else {
         await api.post('/v1/accounting-coa', payload);
@@ -295,11 +207,11 @@ export default function CoaPage() {
       setIsDialogOpen(false);
       fetchData();
     } catch (err: any) {
-      const errorMessage =
+      toast.error(
         err?.response?.data?.message ||
-        err?.message ||
-        'Terjadi kesalahan saat menyimpan data.';
-      toast.error(errorMessage);
+          err?.message ||
+          'Terjadi kesalahan saat menyimpan data.',
+      );
     }
   };
 
@@ -312,8 +224,7 @@ export default function CoaPage() {
       fetchData();
     } catch (err: any) {
       toast.error(
-        err.message ||
-          'Gagal menghapus data. Akun mungkin sedang digunakan di Jurnal Umum.',
+        err.message || 'Gagal menghapus data. Akun mungkin sedang digunakan.',
       );
     } finally {
       setIsDeleting(false);
@@ -364,7 +275,7 @@ export default function CoaPage() {
       columnHelper.accessor('CoACategoryId', {
         header: 'Kategori Akun',
         cell: (info) => {
-          const rowData = info.row.original as any;
+          const rowData = info.row.original;
           const catName =
             rowData.AccountingCoACategory?.name ||
             rowData.CoACategory?.name ||
@@ -440,333 +351,55 @@ export default function CoaPage() {
       )}
 
       <div className='bg-card border border-border rounded-xl shadow-soft-depth overflow-hidden flex flex-col'>
-        <div className='p-4 border-b border-border flex justify-between items-center bg-muted/20'>
-          <div className='text-sm font-medium text-muted-foreground'>
-            Total <span className='text-primary font-bold'>{meta.total}</span>{' '}
-            Akun
+        <div className='p-4 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-muted/20'>
+          <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto'>
+            <SearchInput
+              placeholder='Cari Kode Akun...'
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className='w-full sm:w-64'
+            />
           </div>
 
-          <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant='outline'
-                className='border-border shadow-sm flex items-center gap-2 relative bg-background'
-              >
-                <Filter className='w-4 h-4 text-muted-foreground' />
-                Filter Data
-                {activeFilterCount > 0 && (
-                  <span className='absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white'>
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className='w-80 p-4 rounded-xl border-border shadow-lg'
-              align='end'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <h4 className='font-heading font-bold text-sm text-foreground'>
-                    Filter Spesifik
-                  </h4>
-                  <p className='text-xs text-muted-foreground'>
-                    Pencarian data master akun.
-                  </p>
-                </div>
-
-                <div className='space-y-3'>
-                  <Input
-                    label='Kode / Awalan Akun'
-                    placeholder='Contoh: 110'
-                    value={filterInput.code}
-                    onChange={(e) =>
-                      setFilterInput({ ...filterInput, code: e.target.value })
-                    }
-                  />
-                  <Select
-                    label='Kategori Akun'
-                    options={[
-                      { label: 'Semua Kategori', value: 'ALL' },
-                      ...categories,
-                    ]}
-                    value={filterInput.CoACategoryId}
-                    onChange={(val) =>
-                      setFilterInput({ ...filterInput, CoACategoryId: val })
-                    }
-                  />
-                </div>
-
-                <div className='flex justify-end gap-2 pt-3 border-t border-border/50'>
-                  <Button variant='ghost' size='sm' onClick={resetFilters}>
-                    Reset
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={applyFilters}
-                    className='bg-primary text-white'
-                  >
-                    Terapkan Filter
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <CoaFilter
+            filterInput={filterInput}
+            setFilterInput={setFilterInput}
+            activeFilterCount={activeFilterCount}
+            isFilterOpen={isFilterOpen}
+            setIsFilterOpen={setIsFilterOpen}
+            applyFilters={applyFilters}
+            resetFilters={resetFilters}
+            categories={categories}
+          />
         </div>
 
         <DataTable
           columns={columns as any}
           data={data}
           isLoading={isLoading}
-          emptyMessage='Belum ada data Chart of Accounts.'
+          emptyMessage={
+            debouncedSearch || activeFilterCount > 0
+              ? 'Tidak ada akun yang cocok dengan pencarian/filter.'
+              : 'Belum ada data Chart of Accounts.'
+          }
+          meta={meta}
+          onPageChange={(newPage) => setPage(newPage)}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
         />
-
-        {/* CUSTOM PAGINATION FOOTER */}
-        {!isLoading && meta.total > 0 && (
-          <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-background'>
-            <div className='text-sm text-muted-foreground'>
-              Menampilkan{' '}
-              <span className='font-semibold text-foreground'>
-                {(page - 1) * pageSize + 1}
-              </span>{' '}
-              -{' '}
-              <span className='font-semibold text-foreground'>
-                {Math.min(page * pageSize, meta.total)}
-              </span>{' '}
-              dari{' '}
-              <span className='font-semibold text-foreground'>
-                {meta.total}
-              </span>{' '}
-              data
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <div className='flex items-center gap-2'>
-                <span className='text-xs text-muted-foreground'>
-                  Baris per halaman:
-                </span>
-                <select
-                  className='h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {[10, 20, 50, 100].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className='flex items-center gap-1'>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className='h-4 w-4' />
-                </Button>
-                <div className='flex items-center justify-center w-12 text-sm font-medium'>
-                  {page} / {meta.pageCount || 1}
-                </div>
-                <Button
-                  variant='outline'
-                  size='icon'
-                  className='h-8 w-8'
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= (meta.pageCount || 1)}
-                >
-                  <ChevronRight className='h-4 w-4' />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MODAL FORM CREATE / EDIT COA */}
-      <Modal
+      <CoaFormModal
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title={editingId ? 'Edit Akun (CoA)' : 'Tambah Akun Baru'}
-        size='md'
-        footer={
-          <div className='flex justify-end gap-3 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsDialogOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='submit'
-              form='coa-form'
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={form.formState.isSubmitting}
-            >
-              {form.formState.isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id='coa-form'
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='space-y-5 py-2'
-        >
-          <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-            <Input
-              label='Kode Akun'
-              required
-              placeholder='Contoh: 110-100'
-              error={form.formState.errors.code?.message}
-              {...form.register('code')}
-            />
-            <Input
-              label='Nama Akun'
-              required
-              placeholder='Contoh: Kas Bebas'
-              error={form.formState.errors.name?.message}
-              {...form.register('name')}
-            />
-          </div>
+        initialData={selectedData}
+        onSubmit={onSubmit}
+        categories={categories}
+        refreshCategories={fetchCategories}
+      />
 
-          <div className='space-y-2'>
-            <label className='text-sm font-medium leading-none'>
-              Kategori Akun <span className='text-destructive'>*</span>
-            </label>
-            <Popover
-              open={openCategoryCombobox}
-              onOpenChange={setOpenCategoryCombobox}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant='outline'
-                  role='combobox'
-                  aria-expanded={openCategoryCombobox}
-                  className={cn(
-                    'w-full justify-between font-normal h-10 px-3 border-input bg-background',
-                    !form.watch('CoACategoryId') && 'text-muted-foreground',
-                  )}
-                >
-                  {form.watch('CoACategoryId')
-                    ? categories.find(
-                        (c) => c.value === form.watch('CoACategoryId'),
-                      )?.label
-                    : 'Pilih atau cari kategori...'}
-                  <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                className='w-[--radix-popover-trigger-width] p-0'
-                align='start'
-              >
-                <Command>
-                  <CommandInput placeholder='Cari kategori...' />
-                  <CommandList>
-                    <CommandEmpty>Kategori tidak ditemukan.</CommandEmpty>
-                    <CommandGroup>
-                      {categories.map((category) => (
-                        <CommandItem
-                          key={category.value}
-                          value={category.label}
-                          onSelect={() => {
-                            form.setValue('CoACategoryId', category.value);
-                            form.clearErrors('CoACategoryId');
-                            setOpenCategoryCombobox(false);
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              'mr-2 h-4 w-4',
-                              form.watch('CoACategoryId') === category.value
-                                ? 'opacity-100'
-                                : 'opacity-0',
-                            )}
-                          />
-                          {category.label}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                    <div className='border-t border-border p-1'>
-                      <CommandItem
-                        onSelect={() => {
-                          setOpenCategoryCombobox(false);
-                          setIsCategoryModalOpen(true);
-                        }}
-                        className='flex cursor-pointer items-center justify-center font-medium text-primary aria-selected:bg-primary/10 aria-selected:text-primary'
-                      >
-                        <Plus className='mr-2 h-4 w-4' />
-                        Tambah Kategori Baru...
-                      </CommandItem>
-                    </div>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            {form.formState.errors.CoACategoryId && (
-              <p className='text-[0.8rem] font-medium text-destructive'>
-                {form.formState.errors.CoACategoryId.message}
-              </p>
-            )}
-          </div>
-
-          <div className='grid grid-cols-1'>
-            <NumberInput
-              label='Saldo Awal (Initial Balance)'
-              required
-              value={form.watch('initialBalance')}
-              onChange={(val) => form.setValue('initialBalance', val)}
-              error={form.formState.errors.initialBalance?.message}
-            />
-          </div>
-        </form>
-      </Modal>
-
-      {/* MODAL FORM TAMBAH KATEGORI (SUB-MODAL) */}
-      <Modal
-        isOpen={isCategoryModalOpen}
-        onClose={() => setIsCategoryModalOpen(false)}
-        title='Tambah Kategori Akun Baru'
-        size='sm'
-        footer={
-          <div className='flex justify-end gap-2 w-full'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => setIsCategoryModalOpen(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              type='button'
-              onClick={handleAddCategory}
-              className='bg-primary hover:bg-primary/90 text-white'
-              disabled={isSavingCategory}
-            >
-              {isSavingCategory ? 'Menyimpan...' : 'Simpan Kategori'}
-            </Button>
-          </div>
-        }
-      >
-        <form onSubmit={handleAddCategory} className='space-y-4 py-2'>
-          <Input
-            label='Nama Kategori'
-            required
-            placeholder='Contoh: Aset Lancar, Modal...'
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-          />
-        </form>
-      </Modal>
-
-      {/* ALERT DIALOG DELETE */}
       <AlertDialog
         open={!!deletingId}
         onOpenChange={(open) => !open && setDeletingId(null)}
