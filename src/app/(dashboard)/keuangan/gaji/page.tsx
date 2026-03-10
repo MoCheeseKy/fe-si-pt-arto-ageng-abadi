@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { createColumnHelper } from '@tanstack/react-table';
+import { createColumnHelper, ColumnDef } from '@tanstack/react-table';
 import {
   Plus,
   CreditCard,
@@ -245,7 +245,7 @@ export default function PayrollPage() {
     />
   );
 
-  const columns = useMemo(
+  const columns = useMemo<ColumnDef<PayrollRow, any>[]>(
     () => [
       columnHelper.accessor('period', {
         header: () => (
@@ -301,7 +301,7 @@ export default function PayrollPage() {
           </span>
         ),
       }),
-      columnHelper?.display({
+      columnHelper.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -374,7 +374,7 @@ export default function PayrollPage() {
         </div>
 
         <DataTable
-          columns={columns as any}
+          columns={columns}
           data={data}
           isLoading={isLoading}
           emptyMessage='Belum ada data slip gaji.'

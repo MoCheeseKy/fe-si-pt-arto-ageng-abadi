@@ -32,7 +32,7 @@ export function InvoiceFormModal({
   customers,
 }: InvoiceFormModalProps) {
   const form = useForm<LocalInvoiceFormValues>({
-    resolver: zodResolver(localInvoiceSchema),
+    resolver: zodResolver(localInvoiceSchema as any),
     defaultValues: {
       invoice_number: '',
       date: new Date().toISOString().split('T')[0],

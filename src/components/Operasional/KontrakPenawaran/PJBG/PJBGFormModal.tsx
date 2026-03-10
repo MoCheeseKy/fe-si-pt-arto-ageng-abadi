@@ -15,7 +15,7 @@ export function PJBGFormModal({
   customers,
 }: any) {
   const form = useForm<PjbgFormValues>({
-    resolver: zodResolver(pjbgSchema),
+    resolver: zodResolver(pjbgSchema as any),
     defaultValues: { customer_id: '' },
   });
 

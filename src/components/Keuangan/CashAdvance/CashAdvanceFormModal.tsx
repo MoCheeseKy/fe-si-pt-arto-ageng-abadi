@@ -31,7 +31,7 @@ export function CashAdvanceFormModal({
   employees,
 }: CashAdvanceFormModalProps) {
   const form = useForm<LocalCashAdvanceFormValues>({
-    resolver: zodResolver(localCashAdvanceSchema),
+    resolver: zodResolver(localCashAdvanceSchema as any),
     defaultValues: {
       employee_id: '',
       date: new Date().toISOString().split('T')[0],

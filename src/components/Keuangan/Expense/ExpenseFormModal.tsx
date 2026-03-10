@@ -31,7 +31,7 @@ export function ExpenseFormModal({
   customers,
 }: ExpenseFormModalProps) {
   const form = useForm<LocalExpenseFormValues>({
-    resolver: zodResolver(localExpenseSchema),
+    resolver: zodResolver(localExpenseSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       customer_id: '',

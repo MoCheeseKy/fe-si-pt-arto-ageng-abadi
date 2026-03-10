@@ -17,7 +17,7 @@ export function EvcFormModal({
   customers,
 }: any) {
   const form = useForm<EvcFormValues>({
-    resolver: zodResolver(evcSchema) as any,
+    resolver: zodResolver(evcSchema as any),
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],

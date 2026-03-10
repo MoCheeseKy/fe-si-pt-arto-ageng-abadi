@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { createColumnHelper } from '@tanstack/react-table';
+import { createColumnHelper, ColumnDef } from '@tanstack/react-table';
 import {
   Plus,
   BookText,
@@ -264,7 +264,7 @@ export default function JurnalUmumPage() {
     />
   );
 
-  const columns = useMemo(
+  const columns = useMemo<ColumnDef<JournalRow, any>[]>(
     () => [
       columnHelper.accessor('transaction_date', {
         header: () => (
@@ -311,7 +311,7 @@ export default function JurnalUmumPage() {
           </Badge>
         ),
       }),
-      columnHelper?.display({
+      columnHelper.display({
         id: 'actions',
         header: () => <div className='text-right'>Aksi</div>,
         cell: (info) => (
@@ -386,7 +386,7 @@ export default function JurnalUmumPage() {
         </div>
 
         <DataTable
-          columns={columns as any}
+          columns={columns}
           data={data}
           isLoading={isLoading}
           emptyMessage={

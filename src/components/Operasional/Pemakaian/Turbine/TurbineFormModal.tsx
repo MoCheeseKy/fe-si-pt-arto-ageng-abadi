@@ -17,7 +17,7 @@ export function TurbineFormModal({
   customers,
 }: any) {
   const form = useForm<TurbineFormValues>({
-    resolver: zodResolver(turbineSchema) as any,
+    resolver: zodResolver(turbineSchema as any),
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],

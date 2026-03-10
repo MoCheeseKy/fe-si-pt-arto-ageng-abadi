@@ -30,7 +30,7 @@ export function DepositFormModal({
   customers,
 }: DepositFormModalProps) {
   const form = useForm<LocalDepositFormValues>({
-    resolver: zodResolver(localDepositSchema),
+    resolver: zodResolver(localDepositSchema as any),
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
       customer_id: '',

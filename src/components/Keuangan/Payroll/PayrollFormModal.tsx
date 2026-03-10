@@ -29,7 +29,7 @@ export function PayrollFormModal({
   employees,
 }: PayrollFormModalProps) {
   const form = useForm<LocalPayrollFormValues>({
-    resolver: zodResolver(localPayrollSchema),
+    resolver: zodResolver(localPayrollSchema as any),
     defaultValues: {
       employee_id: '',
       period: '',

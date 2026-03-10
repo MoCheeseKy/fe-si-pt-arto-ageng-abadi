@@ -32,7 +32,7 @@ export function PettyCashFormModal({
   customers,
 }: PettyCashFormModalProps) {
   const form = useForm<LocalPettyCashFormValues>({
-    resolver: zodResolver(localPettyCashSchema),
+    resolver: zodResolver(localPettyCashSchema as any),
     defaultValues: {
       customer_id: '',
       transaction_type: 'Pengeluaran',
